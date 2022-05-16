@@ -1,8 +1,26 @@
-use core::{fmt, ptr};
+use core::{
+    fmt::{self, Write},
+    ptr,
+};
 
-pub struct QEMUOutput;
+use crate::{print, sync::NullLock};
 
-impl fmt::Write for QEMUOutput {
+pub struct QEMUOutputInner;
+pub struct QEMUOutput {
+    inner: NullLock<QEMUOutputInner>,
+}
+
+impl QEMUOutput {
+    const fn new() -> Self {
+        Self {
+            inner: NullLock::new(QEMUOutputInner {}),
+        }
+    }
+}
+
+pub static QEMU_OUTPUT: QEMUOutput = QEMUOutput::new();
+
+impl fmt::Write for QEMUOutputInner {
     fn write_str(&mut self, s: &str) -> fmt::Result {
         for c in s.chars() {
             unsafe {
@@ -10,5 +28,11 @@ impl fmt::Write for QEMUOutput {
             }
         }
         Ok(())
+    }
+}
+
+impl print::Write for QEMUOutput {
+    fn write_fmt(&self, args: fmt::Arguments) -> fmt::Result {
+        self.inner.lock(|inner| inner.write_fmt(args))
     }
 }
