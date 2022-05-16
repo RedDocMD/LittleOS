@@ -1,10 +1,11 @@
 use core::fmt::{self, Write};
 
-use crate::{print, qprintln, sync::NullLock};
+use crate::{print, sync::NullLock};
 
 use super::{
     gpio::GPIO,
     mmio::{MMIODerefWrapper, MMIO_BASE},
+    DeviceDriver,
 };
 use cortex_a::asm;
 use tock_registers::{
@@ -112,7 +113,6 @@ impl MiniUartInner {
         {
             asm::nop();
         }
-        qprintln!("{}", c);
         self.registers.AUX_MU_IO.set(c as u32);
     }
 }
@@ -136,15 +136,17 @@ impl MiniUart {
             inner: NullLock::new(MiniUartInner::new()),
         }
     }
-
-    pub fn init(&self) {
-        self.inner.lock(|inner| inner.init());
-    }
 }
 
 impl print::Write for MiniUart {
     fn write_fmt(&self, args: fmt::Arguments) -> fmt::Result {
         self.inner.lock(|inner| inner.write_fmt(args))
+    }
+}
+
+impl DeviceDriver for MiniUart {
+    fn init(&self) {
+        self.inner.lock(|inner| inner.init());
     }
 }
 
