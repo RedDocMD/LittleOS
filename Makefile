@@ -16,7 +16,7 @@ endif
 ELF := target/aarch64-unknown-none-softfloat/$(TYPE)/kernel
 
 run: $(IMG)
-	qemu-system-aarch64 -kernel $(IMG) -machine raspi3b \
+	qemu-system-aarch64 -kernel $(IMG) -machine raspi3ap \
 		-display none -serial none -serial stdio
 
 $(IMG): $(ELF)

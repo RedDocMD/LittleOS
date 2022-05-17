@@ -19,5 +19,9 @@ unsafe fn kernel_init() -> ! {
 
 fn kernel_main() -> ! {
     kprintln!("Hello, from LittleOS!");
+    let sp: usize;
+    unsafe { core::arch::asm!("mov {x}, sp", x = out(reg) sp) };
+    kprintln!("Stack pointer : {:#018X}", sp);
+    kprintln!("kernel_main   : {:#018X}", kernel_main as *const () as u64);
     cpu::wait_forever();
 }
