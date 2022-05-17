@@ -8,7 +8,7 @@ pub fn wait_forever() -> ! {
 }
 
 #[inline(always)]
-pub fn spin_for_cycle(n: usize) {
+pub fn spin_for_cycles(n: usize) {
     for _ in 0..n {
         asm::nop();
     }

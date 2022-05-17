@@ -77,7 +77,23 @@ struct MiniUartInner {
     registers: Registers,
 }
 
+// use crate::driver::gpio::GPIO_BASE;
+
 impl MiniUartInner {
+    // const GPFSEL1: usize = GPIO_BASE + 0x04;
+    // const GPPUD: usize = GPIO_BASE + 0x94;
+    // const GPPUDCLK0: usize = GPIO_BASE + 0x98;
+
+    // const AUX_ENABLE: usize = MINI_UART_BASE + 0x04;
+    // const AUX_MU_CNTL: usize = MINI_UART_BASE + 0x60;
+    // const AUX_MU_LCR: usize = MINI_UART_BASE + 0x4C;
+    // const AUX_MU_MCR: usize = MINI_UART_BASE + 0x50;
+    // const AUX_MU_IER: usize = MINI_UART_BASE + 0x44;
+    // const AUX_MU_IIR: usize = MINI_UART_BASE + 0x48;
+    // const AUX_MU_BAUD: usize = MINI_UART_BASE + 0x68;
+    // const AUX_MU_IO: usize = MINI_UART_BASE + 0x40;
+    // const AUX_MU_LSR: usize = MINI_UART_BASE + 0x54;
+
     const fn new() -> Self {
         Self {
             registers: unsafe { Registers::new(MINI_UART_BASE) },
@@ -105,6 +121,31 @@ impl MiniUartInner {
             .write(AUX_MU_CNTL::Tx::SET + AUX_MU_CNTL::Rx::SET);
     }
 
+    // unsafe fn init_unsafe(&mut self) {
+    //     use core::ptr::{read, write_volatile};
+
+    //     let val = read(MiniUartInner::AUX_ENABLE as *mut u32);
+    //     write_volatile(MiniUartInner::AUX_ENABLE as *mut u32, val | 1);
+    //     write_volatile(MiniUartInner::AUX_MU_CNTL as *mut u32, 0);
+    //     write_volatile(MiniUartInner::AUX_MU_LCR as *mut u32, 3);
+    //     write_volatile(MiniUartInner::AUX_MU_MCR as *mut u32, 0);
+    //     write_volatile(MiniUartInner::AUX_MU_IER as *mut u32, 0);
+    //     write_volatile(MiniUartInner::AUX_MU_IIR as *mut u32, 0xc6);
+    //     write_volatile(MiniUartInner::AUX_MU_BAUD as *mut u32, 270);
+
+    //     let mut val = read(MiniUartInner::GPFSEL1 as *mut u32);
+    //     val &= !((7 << 12) | (7 << 15));
+    //     val |= (2 << 12) | (2 << 15);
+    //     write_volatile(MiniUartInner::GPFSEL1 as *mut u32, val);
+    //     write_volatile(MiniUartInner::GPPUD as *mut u32, 0);
+    //     crate::cpu::spin_for_cycles(150);
+    //     write_volatile(MiniUartInner::GPPUDCLK0 as *mut u32, (1 << 14) | (1 << 15));
+    //     crate::cpu::spin_for_cycles(150);
+    //     write_volatile(MiniUartInner::GPPUDCLK0 as *mut u32, 0);
+
+    //     write_volatile(MiniUartInner::AUX_MU_CNTL as *mut u32, 3);
+    // }
+
     fn putc(&mut self, c: u8) {
         while self
             .registers
@@ -115,12 +156,25 @@ impl MiniUartInner {
         }
         self.registers.AUX_MU_IO.set(c as u32);
     }
+
+    // unsafe fn putc_unsafe(&mut self, c: u8) {
+    //     use core::ptr::{read, write_volatile};
+
+    //     while read(MiniUartInner::AUX_MU_LSR as *mut u32) & 0x20 == 0 {
+    //         asm::nop();
+    //     }
+    //     write_volatile(MiniUartInner::AUX_MU_IO as *mut u32, c as u32);
+    //     crate::qprintln!("Wrote to {:#010X}, {}", MiniUartInner::AUX_MU_IO, c);
+    // }
 }
 
 impl fmt::Write for MiniUartInner {
     fn write_str(&mut self, s: &str) -> fmt::Result {
         for c in s.bytes() {
             self.putc(c);
+            // unsafe {
+            //     self.putc_unsafe(c);
+            // }
         }
         Ok(())
     }
@@ -147,6 +201,7 @@ impl print::Write for MiniUart {
 impl DeviceDriver for MiniUart {
     fn init(&self) {
         self.inner.lock(|inner| inner.init());
+        // self.inner.lock(|inner| unsafe { inner.init_unsafe() });
     }
 }
 

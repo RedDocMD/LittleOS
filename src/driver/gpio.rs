@@ -8,7 +8,7 @@ use tock_registers::{
 };
 
 const GPIO_OFFSET: usize = 0x20_0000;
-const GPIO_BASE: usize = MMIO_BASE + GPIO_OFFSET;
+pub const GPIO_BASE: usize = MMIO_BASE + GPIO_OFFSET;
 
 register_bitfields! {
     u32,
@@ -63,11 +63,11 @@ impl GpioInner {
 
     fn disable_pull_up_down(&mut self) {
         self.registers.GPPUD.write(GPPUD::PUD::Off);
-        cpu::spin_for_cycle(150);
+        cpu::spin_for_cycles(150);
         self.registers
             .GPPUDCLK0
             .write(GPPUDCLK0::PUDCLK14::SET + GPPUDCLK0::PUDCLK15::SET);
-        cpu::spin_for_cycle(150);
+        cpu::spin_for_cycles(150);
         self.registers.GPPUDCLK0.set(0);
     }
 
