@@ -42,6 +42,9 @@ SECTIONS
     . = ALIGN(PAGE_SIZE);
     __data_end = .;
 
+    . += PAGE_SIZE;
+    __boot_alloc_start = .;
+
     .bss (NOLOAD) : ALIGN(16)
     {
         __bss_start = .;

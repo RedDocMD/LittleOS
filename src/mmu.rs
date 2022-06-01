@@ -43,4 +43,4 @@ impl From<MemAmt> for usize {
     }
 }
 
-pub const PAGE_SIZE: MemAmt = MemAmt::kib(64);
+pub const PAGE_SIZE: usize = 16 * (1 << 10);

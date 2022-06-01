@@ -4,6 +4,10 @@
 #![feature(format_args_nl)]
 #![feature(allocator_api)]
 
+use core::alloc::{Allocator, Layout};
+
+use crate::alloc::boot_alloc::BootAllocator;
+
 mod alloc;
 mod boot;
 mod cpu;
@@ -12,7 +16,6 @@ mod mmu;
 mod panic;
 mod print;
 mod sync;
-mod utils;
 
 unsafe fn kernel_init() -> ! {
     for driver in driver::drivers() {
@@ -29,5 +32,14 @@ fn kernel_main() -> ! {
     kprintln!("kernel_main   : {:#018X}", kernel_main as *const () as u64);
     kprintln!("Data end      : {:#018X}", mmu::layout::data_end());
     kprintln!("Code end      : {:#018X}", mmu::layout::code_end());
+
+    let alloc = BootAllocator::new();
+    match alloc.allocate_zeroed(Layout::array::<i32>(30).unwrap()) {
+        Ok(arr) => {
+            let arr = unsafe { arr.as_ref() };
+            kprintln!("Arr is of size {}", arr.len());
+        }
+        Err(_) => kprintln!("Failed to allocate 30 i32's"),
+    }
     cpu::wait_forever();
 }
