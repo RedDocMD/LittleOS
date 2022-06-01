@@ -113,10 +113,11 @@ unsafe impl Allocator for BootAllocator {
         if size > PAGE_SIZE || alignment > PAGE_SIZE {
             todo!("Implement proper allocator for general size and alignment");
         }
-        if let Some(idx) = self.page_map.borrow().first_clear_idx() {
+        let idx = self.page_map.borrow().first_clear_idx();
+        if let Some(idx) = idx {
             self.page_map.borrow_mut().set(idx);
             let addr = boot_alloc_start() + idx * PAGE_SIZE;
-            let slice = ptr::slice_from_raw_parts_mut(addr as *mut u8, PAGE_SIZE);
+            let slice = ptr::slice_from_raw_parts_mut(addr as *mut u8, size);
             return Ok(NonNull::new(slice).unwrap());
         }
         Err(AllocError)

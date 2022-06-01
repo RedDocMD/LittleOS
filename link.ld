@@ -1,7 +1,7 @@
 __rpi_phys_dram_start_addr = 0;
 __rpi_phys_binary_load_addr = 0x80000;
 
-PAGE_SIZE = 64K;
+PAGE_SIZE = 16K;
 
 ENTRY(__rpi_phys_binary_load_addr)
 
