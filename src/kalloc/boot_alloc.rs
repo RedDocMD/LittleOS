@@ -4,7 +4,7 @@ use core::{
 };
 
 use crate::{
-    alloc::{AllocError, Allocator, Layout},
+    kalloc::{AllocError, Allocator, Layout},
     mmu::{layout::boot_alloc_start, PAGE_SIZE},
 };
 

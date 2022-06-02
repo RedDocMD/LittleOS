@@ -4,14 +4,12 @@
 #![feature(format_args_nl)]
 #![feature(allocator_api)]
 
-use core::alloc::{Allocator, Layout};
+use crate::kalloc::{boot_alloc::BootAllocator, Allocator, Layout};
 
-use crate::alloc::boot_alloc::BootAllocator;
-
-mod alloc;
 mod boot;
 mod cpu;
 mod driver;
+mod kalloc;
 mod mmu;
 mod panic;
 mod print;
