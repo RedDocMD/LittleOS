@@ -3,6 +3,11 @@
 #![feature(asm_const)]
 #![feature(format_args_nl)]
 #![feature(allocator_api)]
+#![feature(alloc_error_handler)]
+
+extern crate alloc as std_alloc;
+
+use std_alloc::vec::Vec;
 
 use crate::kalloc::{boot_alloc::BootAllocator, Allocator, Layout};
 
@@ -32,6 +37,7 @@ fn kernel_main() -> ! {
     kprintln!("Code end      : {:#018X}", mmu::layout::code_end());
 
     let alloc = BootAllocator::new();
+
     let arr_layout = Layout::array::<i32>(30).unwrap();
     kprintln!("Allocating array ...");
     match alloc.allocate_zeroed(arr_layout) {
@@ -51,5 +57,15 @@ fn kernel_main() -> ! {
         }
         Err(_) => kprintln!("Failed to allocate 30 i32's"),
     }
+
+    kprintln!("Using a Vec ...");
+    let mut nums = Vec::new_in(&alloc);
+    const NUMS_COUNT: usize = 10;
+    nums.reserve(NUMS_COUNT);
+    for i in 0..NUMS_COUNT {
+        nums.push((i + 1) * 2);
+    }
+    kprintln!("nums = {:?}", nums);
+
     cpu::wait_forever();
 }
