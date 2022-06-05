@@ -23,6 +23,10 @@ unsafe impl core::alloc::GlobalAlloc for StubGlobalAllocator {
 static STUB_GLOBAL_ALLOCATOR: StubGlobalAllocator = StubGlobalAllocator {};
 
 #[alloc_error_handler]
-fn stub_alloc_error_handler(_: Layout) -> ! {
-    unreachable!("do not use the StubGlobalAllocator, use a custom Allocator instead");
+fn stub_alloc_error_handler(layout: Layout) -> ! {
+    panic!(
+        "Failed to allocate {} bytes with alignment of {}",
+        layout.size(),
+        layout.align()
+    );
 }
