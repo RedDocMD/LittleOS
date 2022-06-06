@@ -1,8 +1,6 @@
 __rpi_phys_dram_start_addr = 0;
 __rpi_phys_binary_load_addr = 0x80000;
 
-PAGE_SIZE = 16K;
-
 ENTRY(__rpi_phys_binary_load_addr)
 
 PHDRS
@@ -31,18 +29,22 @@ SECTIONS
         *(.text*)                 
     } :segment_code
 
-    .rodata : ALIGN(8) { *(.rodata*) } :segment_code
+    .rodata : ALIGN(8) { 
+        *(.rodata*);
+        __page_size = 4K;
+    } :segment_code
+
     .got    : ALIGN(8) { *(.got)     } :segment_code
 
-    . = ALIGN(PAGE_SIZE);
+    . = ALIGN(__page_size);
     __code_end = .;
 
     .data : { *(.data*) } :segment_data
 
-    . = ALIGN(PAGE_SIZE);
+    . = ALIGN(__page_size);
     __data_end = .;
 
-    . += PAGE_SIZE;
+    . += __page_size;
     __boot_alloc_start = .;
 
     .bss (NOLOAD) : ALIGN(16)

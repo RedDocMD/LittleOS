@@ -1,3 +1,5 @@
+use core::cell::UnsafeCell;
+
 pub mod layout;
 
 #[derive(Debug)]
@@ -43,7 +45,14 @@ impl From<MemAmt> for usize {
     }
 }
 
-pub const PAGE_SIZE: usize = 16 * (1 << 10);
+extern "Rust" {
+    static __page_size: UnsafeCell<()>;
+}
+
+#[inline(always)]
+pub fn page_size() -> usize {
+    unsafe { __page_size.get() as usize }
+}
 
 pub const fn align_down(value: usize, align: usize) -> usize {
     (value) & !(align - 1)
