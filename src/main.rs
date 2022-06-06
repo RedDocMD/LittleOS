@@ -9,7 +9,10 @@ extern crate alloc as std_alloc;
 
 use std_alloc::vec::Vec;
 
-use crate::kalloc::{boot_alloc::BootAllocator, Allocator, Layout};
+use crate::{
+    kalloc::{boot_alloc::BootAllocator, Allocator, Layout},
+    mmu::layout::boot_alloc_start,
+};
 
 mod boot;
 mod cpu;
@@ -66,6 +69,14 @@ fn kernel_main() -> ! {
         nums.push((i + 1) * 2);
     }
     kprintln!("nums = {:?}", nums);
+
+    let mut floats: Vec<f32, _> = Vec::new_in(&alloc);
+    const FLOATS_COUNT: usize = 15;
+    floats.reserve(FLOATS_COUNT);
+
+    kprintln!("Bootmem start = {:#018X}", boot_alloc_start());
+    kprintln!("nums start =    {:#018X}", nums.as_ptr() as usize);
+    kprintln!("floats start =  {:#018X}", floats.as_ptr() as usize);
 
     cpu::wait_forever();
 }
