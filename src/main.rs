@@ -10,8 +10,8 @@ extern crate alloc as std_alloc;
 use std_alloc::vec::Vec;
 
 use crate::{
-    kalloc::{boot_alloc::BootAllocator, Allocator, Layout},
-    mmu::layout::boot_alloc_start,
+    kalloc::{bitmap_alloc::BitmapAllocator, Allocator, Layout},
+    mmu::layout::{boot_alloc_start, data_end},
 };
 
 mod boot;
@@ -39,7 +39,7 @@ fn kernel_main() -> ! {
     kprintln!("Data end      : {:#018X}", mmu::layout::data_end());
     kprintln!("Code end      : {:#018X}", mmu::layout::code_end());
 
-    let alloc = BootAllocator::new();
+    let alloc = BitmapAllocator::new(data_end(), boot_alloc_start());
 
     let arr_layout = Layout::array::<i32>(30).unwrap();
     kprintln!("Allocating array ...");

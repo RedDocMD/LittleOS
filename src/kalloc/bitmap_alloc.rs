@@ -6,22 +6,17 @@ use core::{
 
 use crate::{
     kalloc::{AllocError, Allocator, Layout},
-    mmu::{
-        align_up, is_aligned,
-        layout::{boot_alloc_start, data_end},
-        page_size,
-    },
+    mmu::{align_up, is_aligned, page_size},
 };
 
 use bitvec::slice::BitSlice;
 
-/// BootAllocator is an allocator that is meant to be used only early up
-/// in the boot process, before the MMU is setup and we
-/// can use proper allocators, like the buddy allocator or
-/// slab allocator.
-pub struct BootAllocator {
+// BitmapAllocator is super lame - use it only before MMU is setup
+// and then switch to something better.
+pub struct BitmapAllocator {
     page_map: RefCell<&'static mut BitSlice<u64>>,
     last_page: Cell<Option<LastPage>>,
+    base: usize,
 }
 
 #[derive(Clone, Copy)]
@@ -30,13 +25,13 @@ struct LastPage {
     off: usize,
 }
 
-impl BootAllocator {
-    pub fn new() -> Self {
+impl BitmapAllocator {
+    pub fn new(addr: usize, base: usize) -> Self {
         const BOOT_ALLOC_SPACE: usize = 16 * (1 << 20);
         let boot_alloc_page_count: usize = BOOT_ALLOC_SPACE / page_size();
         let bitmap_len: usize = boot_alloc_page_count / 8;
 
-        let slice = ptr::slice_from_raw_parts_mut(data_end() as *mut u64, bitmap_len);
+        let slice = ptr::slice_from_raw_parts_mut(addr as *mut u64, bitmap_len);
         let mut long_words = NonNull::new(slice).unwrap();
         let long_words_slice = unsafe { long_words.as_mut() };
         let bitmap = BitSlice::from_slice_mut(long_words_slice);
@@ -45,6 +40,7 @@ impl BootAllocator {
         Self {
             page_map: RefCell::new(bitmap),
             last_page: Cell::new(None),
+            base,
         }
     }
 
@@ -53,7 +49,7 @@ impl BootAllocator {
     }
 }
 
-unsafe impl Allocator for BootAllocator {
+unsafe impl Allocator for BitmapAllocator {
     fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
         let size = layout.size();
         let alignment = layout.align();
@@ -72,7 +68,7 @@ unsafe impl Allocator for BootAllocator {
             }
 
             // Special case - try to squeeze into last page
-            let shift = shift_from_last_page(&self.last_page(), page_idx, alignment);
+            let shift = shift_from_last_page(&self.last_page(), page_idx, alignment, self.base);
             if let Some(shift) = shift {
                 match shift.cmp(&residual_size) {
                     Ordering::Less => {
@@ -95,7 +91,7 @@ unsafe impl Allocator for BootAllocator {
                     }
                 }
 
-                let addr = boot_alloc_start() + page_idx * page_size() - shift;
+                let addr = self.base + page_idx * page_size() - shift;
                 let ptr = ptr::slice_from_raw_parts_mut(addr as *mut u8, size);
                 return Ok(NonNull::new(ptr).unwrap());
             }
@@ -111,7 +107,7 @@ unsafe impl Allocator for BootAllocator {
                 self.last_page.set(None);
             }
 
-            let addr = boot_alloc_start() + page_idx * page_size();
+            let addr = self.base + page_idx * page_size();
             let ptr = ptr::slice_from_raw_parts_mut(addr as *mut u8, size);
             return Ok(NonNull::new(ptr).unwrap());
         }
@@ -135,11 +131,11 @@ unsafe impl Allocator for BootAllocator {
             let new_page_cnt = new_actual_size / page_size();
             let mut bitmap = self.page_map.borrow_mut();
             if new_page_cnt > 0 {
-                let new_page_idx = (next_page_addr - boot_alloc_start()) / page_size();
+                let new_page_idx = (next_page_addr - self.base) / page_size();
                 bitmap[new_page_idx..(new_page_idx + new_page_cnt)].fill(false);
                 // TODO: Put better logic for last_page update
             } else if let Some(last_page) = self.last_page() {
-                let page_idx = (start_addr - boot_alloc_start()) / page_size();
+                let page_idx = (start_addr - self.base) / page_size();
                 if last_page.idx == page_idx && last_page.off == start_addr + actual_size {
                     self.last_page.set(Some(LastPage {
                         idx: last_page.idx,
@@ -150,7 +146,7 @@ unsafe impl Allocator for BootAllocator {
         } else {
             // If the last page was partially allocated, leave it marked as allocated.
             let page_cnt = actual_size / page_size();
-            let page_idx = (start_addr - boot_alloc_start()) / page_size();
+            let page_idx = (start_addr - self.base) / page_size();
             let mut bitmap = self.page_map.borrow_mut();
             if page_cnt > 0 {
                 bitmap[page_idx..(page_idx + page_cnt)].fill(false);
@@ -187,14 +183,15 @@ fn shift_from_last_page(
     last_page: &Option<LastPage>,
     page_idx: usize,
     alignment: usize,
+    base: usize,
 ) -> Option<usize> {
     if let Some(last_page) = last_page {
         if last_page.idx == page_idx - 1 {
             let last_ins_addr = align_up(
-                boot_alloc_start() + last_page.idx * page_size() + last_page.off,
+                base + last_page.idx * page_size() + last_page.off,
                 alignment,
             );
-            let curr_ins_addr = boot_alloc_start() + page_idx * page_size();
+            let curr_ins_addr = base + page_idx * page_size();
             let shift = curr_ins_addr - last_ins_addr;
             if shift == 0 {
                 return None;

@@ -1,4 +1,4 @@
-pub mod boot_alloc;
+pub mod bitmap_alloc;
 
 pub use core::alloc::{AllocError, Allocator, Layout};
 
