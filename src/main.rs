@@ -13,9 +13,12 @@ use crate::{
     kalloc::bitmap_alloc::BitmapAllocator,
     mmu::{
         layout::{boot_alloc_start, l0_pt_start, l1_pt_start, l2_pt_start, l3_pt_start, pt_end},
-        paging::PageTables,
+        page_size,
+        paging::{AccessPermission, PageDescriptor, PageTables},
     },
 };
+
+use self::mmu::paging::TableDescriptor;
 
 mod boot;
 mod cpu;
@@ -48,7 +51,9 @@ fn kernel_main() -> ! {
         kprintln!("Failed to retrieve current execution level");
     }
 
-    let _page_tables = PageTables::new(l0_pt_start(), l1_pt_start(), l2_pt_start(), l3_pt_start());
+    let mut page_tables =
+        PageTables::new(l0_pt_start(), l1_pt_start(), l2_pt_start(), l3_pt_start());
+    setup_identity_map(&mut page_tables);
 
     let alloc = BitmapAllocator::new(pt_end(), boot_alloc_start());
 
@@ -70,4 +75,21 @@ fn kernel_main() -> ! {
     kprintln!("floats start =  {:#018X}", floats.as_ptr() as usize);
 
     cpu::wait_forever();
+}
+
+fn setup_identity_map(page_tables: &mut PageTables) {
+    // Setup the first 128 MiB as identity mapped.
+    page_tables.l0_table()[0] = TableDescriptor::new(page_tables.l1_table().as_ptr() as usize);
+    page_tables.l1_table()[0] = TableDescriptor::new(page_tables.l2_table().as_ptr() as usize);
+    const L2_ENTRY_COUNT: usize = 64;
+    const L2_SPAN: usize = 2 * (1 << 20);
+    for i in 0..L2_ENTRY_COUNT {
+        page_tables.l2_table()[i] = TableDescriptor::new(page_tables.l3_table(i).as_ptr() as usize);
+        let l3_table = page_tables.l3_table(i);
+        for (j, l3_entry) in l3_table.iter_mut().enumerate() {
+            let addr = i * L2_SPAN + j * page_size();
+            let desc = PageDescriptor::new(addr).with_ap(AccessPermission::PrivilegedReadWrite);
+            *l3_entry = desc;
+        }
+    }
 }

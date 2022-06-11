@@ -128,6 +128,22 @@ impl PageTables {
             l3_tables,
         }
     }
+
+    pub fn l0_table(&mut self) -> &mut [TableDescriptor] {
+        self.l0_table
+    }
+
+    pub fn l1_table(&mut self) -> &mut [TableDescriptor] {
+        self.l1_table
+    }
+
+    pub fn l2_table(&mut self) -> &mut [TableDescriptor] {
+        self.l2_table
+    }
+
+    pub fn l3_table(&mut self, idx: usize) -> &mut [PageDescriptor] {
+        &mut self.l3_tables[idx]
+    }
 }
 
 fn fill_with_invalid_table_entries(table: &mut [TableDescriptor]) {
