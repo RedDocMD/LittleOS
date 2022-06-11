@@ -1,7 +1,7 @@
 use core::mem::{self, MaybeUninit};
 use core::ptr;
 
-use crate::mmu::{page_size_order, TOTAL_MEMORY};
+use crate::mmu::page_size_order;
 
 use super::page_size;
 
@@ -78,17 +78,18 @@ impl PageDescriptor {
 type PageTable = &'static mut [PageDescriptor];
 type HigherTable = &'static mut [TableDescriptor];
 
+const L3_TABLES_COUNT: usize = 256;
+
 pub struct PageTables {
     l0_table: HigherTable,
     l1_table: HigherTable,
     l2_table: HigherTable,
-    l3_tables: &'static mut [PageTable],
+    l3_tables: [PageTable; L3_TABLES_COUNT],
 }
 
 impl PageTables {
     pub fn new(l0_addr: usize, l1_addr: usize, l2_addr: usize, l3_addr: usize) -> PageTables {
         const ENTRIES_PER_TABLE: usize = 512;
-        let l3_tables_count: usize = TOTAL_MEMORY / (ENTRIES_PER_TABLE * page_size());
 
         let l0_table_ptr =
             ptr::slice_from_raw_parts_mut(l0_addr as *mut TableDescriptor, ENTRIES_PER_TABLE);
@@ -105,21 +106,22 @@ impl PageTables {
         let l2_table = unsafe { &mut *l2_table_ptr };
         fill_with_invalid_table_entries(l2_table);
 
-        let l3_tables_ptr =
-            ptr::slice_from_raw_parts_mut(l3_addr as *mut MaybeUninit<PageTable>, l3_tables_count);
-        let l3_tables = unsafe { &mut *l3_tables_ptr };
-        for (i, uninit_l3_table) in l3_tables.iter_mut().enumerate() {
-            let l3_table_addr = l3_addr + i * page_size();
-            let l3_table_ptr = ptr::slice_from_raw_parts_mut(
-                l3_table_addr as *mut PageDescriptor,
-                ENTRIES_PER_TABLE,
-            );
-            let l3_table = unsafe { &mut *l3_table_ptr };
-            fill_with_invalid_page_entries(l3_table);
+        let l3_tables = {
+            let mut l3_tables: [MaybeUninit<PageTable>; L3_TABLES_COUNT] =
+                unsafe { MaybeUninit::uninit().assume_init() };
+            for (i, uninit_l3_table) in l3_tables.iter_mut().enumerate() {
+                let l3_table_addr = l3_addr + i * page_size();
+                let l3_table_ptr = ptr::slice_from_raw_parts_mut(
+                    l3_table_addr as *mut PageDescriptor,
+                    ENTRIES_PER_TABLE,
+                );
+                let l3_table = unsafe { &mut *l3_table_ptr };
+                fill_with_invalid_page_entries(l3_table);
 
-            uninit_l3_table.write(l3_table);
-        }
-        let l3_tables = unsafe { mem::transmute(l3_tables) };
+                uninit_l3_table.write(l3_table);
+            }
+            unsafe { mem::transmute(l3_tables) }
+        };
 
         PageTables {
             l0_table,
