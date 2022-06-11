@@ -1,6 +1,7 @@
 use core::cell::UnsafeCell;
 
 pub mod layout;
+pub mod paging;
 
 #[derive(Debug)]
 pub enum MemAmt {
