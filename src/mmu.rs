@@ -61,6 +61,8 @@ pub fn page_size_order() -> usize {
     unsafe { __page_size_order.get() as usize }
 }
 
+pub const TOTAL_MEMORY: usize = 512 * (1 << 20);
+
 pub const fn align_down(value: usize, align: usize) -> usize {
     (value) & !(align - 1)
 }

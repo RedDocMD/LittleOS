@@ -31,10 +31,9 @@ impl BitmapAllocator {
         let boot_alloc_page_count: usize = BOOT_ALLOC_SPACE / page_size();
         let bitmap_len: usize = boot_alloc_page_count / 8;
 
-        let slice = ptr::slice_from_raw_parts_mut(addr as *mut u64, bitmap_len);
-        let mut long_words = NonNull::new(slice).unwrap();
-        let long_words_slice = unsafe { long_words.as_mut() };
-        let bitmap = BitSlice::from_slice_mut(long_words_slice);
+        let slice_ptr = ptr::slice_from_raw_parts_mut(addr as *mut u64, bitmap_len);
+        let slice = unsafe { &mut *slice_ptr };
+        let bitmap = BitSlice::from_slice_mut(slice);
         bitmap.fill(false);
 
         Self {

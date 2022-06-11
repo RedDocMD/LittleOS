@@ -11,7 +11,10 @@ use std_alloc::vec::Vec;
 
 use crate::{
     kalloc::bitmap_alloc::BitmapAllocator,
-    mmu::layout::{boot_alloc_start, data_end},
+    mmu::{
+        layout::{boot_alloc_start, l0_pt_start, l1_pt_start, l2_pt_start, l3_pt_start, pt_end},
+        paging::PageTables,
+    },
 };
 
 mod boot;
@@ -37,7 +40,6 @@ fn kernel_main() -> ! {
     unsafe { core::arch::asm!("mov {x}, sp", x = out(reg) sp) };
     kprintln!("Stack pointer : {:#018X}", sp);
     kprintln!("kernel_main   : {:#018X}", kernel_main as *const () as u64);
-    kprintln!("Data end      : {:#018X}", mmu::layout::data_end());
     kprintln!("Code end      : {:#018X}", mmu::layout::code_end());
 
     if let Some(el) = cpu::current_el() {
@@ -46,7 +48,9 @@ fn kernel_main() -> ! {
         kprintln!("Failed to retrieve current execution level");
     }
 
-    let alloc = BitmapAllocator::new(data_end(), boot_alloc_start());
+    let _page_tables = PageTables::new(l0_pt_start(), l1_pt_start(), l2_pt_start(), l3_pt_start());
+
+    let alloc = BitmapAllocator::new(pt_end(), boot_alloc_start());
 
     kprintln!("Using a Vec ...");
     let mut nums = Vec::new_in(&alloc);

@@ -3,6 +3,8 @@ __rpi_phys_binary_load_addr = 0x80000;
 
 ENTRY(__rpi_phys_binary_load_addr)
 
+__l3_pt_cnt = 256;
+
 PHDRS
 {
     segment_boot_core_stack PT_LOAD FLAGS(6);
@@ -42,10 +44,26 @@ SECTIONS
 
     .data : { *(.data*) } :segment_data
 
+    /* Place the page tables in memory */
     . = ALIGN(__page_size);
-    __data_end = .;
+    __l0_pt_start = .;
 
     . += __page_size;
+    __l1_pt_start = .;
+
+    . += __page_size;
+    __l2_pt_start = .;
+
+    . += __page_size;
+    __l3_pt_start = .;
+
+    /* Mark where page tables end */
+    . += __l3_pt_cnt * __page_size;
+    __pt_end = .;
+
+    /* This page is used to store the bitmap of the boot allocator */
+    . += __page_size;
+    /* Thereafter, we have the memory of the boot allocator */
     __boot_alloc_start = .;
 
     .bss (NOLOAD) : ALIGN(16)
