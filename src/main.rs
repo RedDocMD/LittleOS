@@ -10,7 +10,7 @@ extern crate alloc as std_alloc;
 use std_alloc::vec::Vec;
 
 use crate::{
-    kalloc::{bitmap_alloc::BitmapAllocator, Allocator, Layout},
+    kalloc::bitmap_alloc::BitmapAllocator,
     mmu::layout::{boot_alloc_start, data_end},
 };
 
@@ -32,6 +32,7 @@ unsafe fn kernel_init() -> ! {
 
 fn kernel_main() -> ! {
     kprintln!("Hello, from LittleOS!");
+
     let sp: usize;
     unsafe { core::arch::asm!("mov {x}, sp", x = out(reg) sp) };
     kprintln!("Stack pointer : {:#018X}", sp);
@@ -39,27 +40,13 @@ fn kernel_main() -> ! {
     kprintln!("Data end      : {:#018X}", mmu::layout::data_end());
     kprintln!("Code end      : {:#018X}", mmu::layout::code_end());
 
-    let alloc = BitmapAllocator::new(data_end(), boot_alloc_start());
-
-    let arr_layout = Layout::array::<i32>(30).unwrap();
-    kprintln!("Allocating array ...");
-    match alloc.allocate_zeroed(arr_layout) {
-        Ok(arr) => {
-            let arr =
-                unsafe { &mut *core::ptr::slice_from_raw_parts_mut(arr.as_ptr() as *mut i32, 30) };
-            kprintln!("Arr is of size {}", arr.len());
-            for i in (0..arr.len()).rev() {
-                arr[arr.len() - i - 1] = (i * i) as i32;
-            }
-            kprintln!("Array before sorting: {:?}", arr);
-            arr.sort_unstable();
-            kprintln!("Array after sorting: {:?}", arr);
-            let arr_ptr = core::ptr::NonNull::new(arr.as_mut_ptr() as *mut u8).unwrap();
-            unsafe { alloc.deallocate(arr_ptr, arr_layout) };
-            kprintln!("Deallocated array ...");
-        }
-        Err(_) => kprintln!("Failed to allocate 30 i32's"),
+    if let Some(el) = cpu::current_el() {
+        kprintln!("Current execution level is EL{}", el);
+    } else {
+        kprintln!("Failed to retrieve current execution level");
     }
+
+    let alloc = BitmapAllocator::new(data_end(), boot_alloc_start());
 
     kprintln!("Using a Vec ...");
     let mut nums = Vec::new_in(&alloc);

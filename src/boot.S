@@ -22,6 +22,10 @@ _start:
 
 	// If execution reaches here, it is the boot core.
 
+	// Initialize EL2 vector table
+	ADR_REL x0, el2_exception_vector
+	msr VBAR_EL2, x0
+
 	// Initialize DRAM.
 	ADR_REL	x0, __bss_start
 	ADR_REL x1, __bss_end_exclusive
@@ -38,6 +42,9 @@ _start:
 	ADR_REL	x0, __boot_core_stack_end_exclusive
 	mov	sp, x0
 
+	// Move from EL2 to EL1
+	hvc 1 // This number could be anything
+
 	// Jump to Rust code.
 	b	_start_rust
 
@@ -49,3 +56,25 @@ _start:
 .size	_start, . - _start
 .type	_start, function
 .global	_start
+
+
+// EL2 Exception vector
+// Currently, we only need el2_curr_el_spx_synch
+// This needs to be at an offest of 0x200
+.align 7
+el2_exception_vector:
+// All this handler is used for is to jump back to EL1
+// So, it overwrites bits [3:0] to 0b0101 so that we go
+// to EL1 on return but retain the same stack as before.
+// Also, set SP_EL1 to correct sp before returning.
+.zero 0x200
+el2_curr_el_spx_synch:
+	str x0, [sp, -16]!
+	mrs x0, SPSR_EL2
+	and x0, x0, 0xFFFFFFFFFFFFFFF0
+	add x0, x0, 0b0101
+	msr SPSR_EL2, x0
+	ldr x0, [sp], 16
+	mov x0, sp
+	msr SP_EL1, x0
+	eret

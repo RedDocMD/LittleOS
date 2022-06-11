@@ -10,6 +10,7 @@ pub fn console() -> &'static impl crate::print::Write {
     &PL011_UART
 }
 
+#[allow(dead_code)]
 pub fn qemu_console() -> &'static impl crate::print::Write {
     &QEMU_OUTPUT
 }
