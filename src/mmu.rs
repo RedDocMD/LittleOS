@@ -48,11 +48,17 @@ impl From<MemAmt> for usize {
 
 extern "Rust" {
     static __page_size: UnsafeCell<()>;
+    static __page_size_order: UnsafeCell<()>;
 }
 
 #[inline(always)]
 pub fn page_size() -> usize {
     unsafe { __page_size.get() as usize }
+}
+
+#[inline(always)]
+pub fn page_size_order() -> usize {
+    unsafe { __page_size_order.get() as usize }
 }
 
 pub const fn align_down(value: usize, align: usize) -> usize {

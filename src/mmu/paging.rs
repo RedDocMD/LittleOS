@@ -1,4 +1,13 @@
-const ADDR_MASK: usize = 0x0000_FFFF_FFFF_F000;
+use crate::mmu::page_size_order;
+
+#[inline(always)]
+fn addr_mask() -> usize {
+    let mut mask: usize = !0;
+    const TOP_MASK: usize = 0xFFFF_0000_0000_0000;
+    mask &= !TOP_MASK;
+    mask &= !((1 << page_size_order()) - 1);
+    mask
+}
 
 #[repr(transparent)]
 pub struct TableDescriptor(u64);
@@ -6,7 +15,7 @@ pub struct TableDescriptor(u64);
 impl TableDescriptor {
     pub fn new(table_addr: usize) -> TableDescriptor {
         let mut desc: u64 = 0b11; // 0b11 means table descriptor
-        desc |= (table_addr & ADDR_MASK) as u64;
+        desc |= (table_addr & addr_mask()) as u64;
         TableDescriptor(desc)
     }
 }
@@ -25,7 +34,7 @@ pub enum AccessPermission {
 impl PageDescriptor {
     pub fn new(page_addr: usize) -> PageDescriptor {
         let mut desc: u64 = 0b01; // 0b01 means block/page descriptor
-        desc |= (page_addr & ADDR_MASK) as u64;
+        desc |= (page_addr & addr_mask()) as u64;
         PageDescriptor(desc)
     }
 

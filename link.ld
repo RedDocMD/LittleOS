@@ -16,8 +16,8 @@ SECTIONS
 
     .boot_core_stack (NOLOAD) :
     {
-        . += __rpi_phys_binary_load_addr;   
-                                            
+        . += __rpi_phys_binary_load_addr;
+
         __boot_core_stack_end_exclusive = .;
     } :segment_boot_core_stack
 
@@ -26,15 +26,16 @@ SECTIONS
         KEEP(*(.text._start))
         *(.text._start_arguments)
         *(.text._start_rust)
-        *(.text*)                 
+        *(.text*)
     } :segment_code
 
-    .rodata : ALIGN(8) { 
+    .rodata : ALIGN(8) {
         *(.rodata*);
-        __page_size = 4K;
+        __page_size_order = 12;
+        __page_size = 1 << __page_size_order;
     } :segment_code
 
-    .got    : ALIGN(8) { *(.got)     } :segment_code
+    .got : ALIGN(8) { *(.got) } :segment_code
 
     . = ALIGN(__page_size);
     __code_end = .;
