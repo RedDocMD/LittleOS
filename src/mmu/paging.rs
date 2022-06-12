@@ -1,6 +1,8 @@
 use core::mem::{self, MaybeUninit};
 use core::ptr;
 
+use tock_registers::interfaces::{ReadWriteable, Readable, Writeable};
+
 use crate::mmu::page_size_order;
 
 use super::page_size;
@@ -145,6 +147,83 @@ impl PageTables {
 
     pub fn l3_table(&mut self, idx: usize) -> &mut [PageDescriptor] {
         &mut self.l3_tables[idx]
+    }
+
+    pub fn load(&self) {
+        use cortex_a::{asm::barrier::*, registers::*};
+        const VIRT_BITS: u64 = 48;
+
+        TTBR0_EL1.set(self.l0_table.as_ptr() as u64);
+
+        // Virtual address size is 48 bits
+        TCR_EL1.modify(TCR_EL1::T0SZ.val(64 - VIRT_BITS) + TCR_EL1::T1SZ.val(64 - VIRT_BITS));
+        // Translation granule is 4K
+        TCR_EL1.modify(TCR_EL1::TG0::KiB_4 + TCR_EL1::TG1::KiB_4);
+        // TODO: Set caching attributes
+        // TODO: Set SMP attributes
+
+        // Set PA range
+        TCR_EL1.modify(TCR_EL1::IPS.val(ID_AA64MMFR0_EL1.read(ID_AA64MMFR0_EL1::PARange)));
+        // Set ASID bits (8 or 16)
+        match ID_AA64MMFR0_EL1
+            .read_as_enum::<ID_AA64MMFR0_EL1::ASIDBits::Value>(ID_AA64MMFR0_EL1::ASIDBits)
+        {
+            Some(ID_AA64MMFR0_EL1::ASIDBits::Value::Bits_16) => {
+                TCR_EL1.modify(TCR_EL1::AS::ASID16Bits)
+            }
+            Some(ID_AA64MMFR0_EL1::ASIDBits::Value::Bits_8) => {
+                TCR_EL1.modify(TCR_EL1::AS::ASID8Bits)
+            }
+            None => crate::kprintln!("Failed to retrieve ASID bit count"),
+        }
+
+        // Check if we have AF and dirty bit support
+        const HA_SHIFT: u64 = 39;
+        const HD_SHIFT: u64 = 40;
+        let mut tcr_el1_val = TCR_EL1.get();
+        match hw_af_db_support() {
+            AfAndDbSupport::AfSupported => {
+                tcr_el1_val |= 1 << HA_SHIFT;
+                TCR_EL1.set(tcr_el1_val);
+            }
+            AfAndDbSupport::AfAndDbSupported => {
+                tcr_el1_val |= 1 << HA_SHIFT;
+                tcr_el1_val |= 1 << HD_SHIFT;
+                TCR_EL1.set(tcr_el1_val);
+            }
+            _ => {}
+        }
+
+        // Now do an ISB to force these changes to be seen
+        unsafe { isb(SY) };
+
+        // Enable MMU with SCTLR_EL1
+        SCTLR_EL1.modify(SCTLR_EL1::M::Enable);
+
+        // Now do an ISB to force these changes to be seen
+        unsafe { isb(SY) };
+    }
+}
+
+fn id_aa64mmfr1_el1() -> u64 {
+    let id: u64;
+    unsafe { core::arch::asm!("mrs {x}, ID_AA64MMFR1_EL1", x = out(reg) id) };
+    id
+}
+
+enum AfAndDbSupport {
+    NotSupported,
+    AfSupported,
+    AfAndDbSupported,
+}
+
+fn hw_af_db_support() -> AfAndDbSupport {
+    const HAFDBS_MASK: u64 = 0b1111;
+    match id_aa64mmfr1_el1() & HAFDBS_MASK {
+        0b0000 => AfAndDbSupport::NotSupported,
+        0b0001 => AfAndDbSupport::AfSupported,
+        0b0010 => AfAndDbSupport::AfAndDbSupported,
+        _ => unreachable!("invalid value for HAFDBS field of ID_AA64MMFF1_EL1"),
     }
 }
 
