@@ -22,13 +22,17 @@ pub struct TableDescriptor(u64);
 
 impl TableDescriptor {
     pub fn new(table_addr: usize) -> TableDescriptor {
-        let mut desc: u64 = 0b11; // 0b11 means table descriptor
+        let mut desc: u64 = 0b11; // First 1 means table descriptor, second means valid
         desc |= (table_addr & addr_mask()) as u64;
         TableDescriptor(desc)
     }
 
     pub fn invalid() -> TableDescriptor {
         TableDescriptor(0)
+    }
+
+    pub fn value(&self) -> u64 {
+        self.0
     }
 }
 
@@ -46,7 +50,7 @@ pub enum AccessPermission {
 
 impl PageDescriptor {
     pub fn new(page_addr: usize) -> PageDescriptor {
-        let mut desc: u64 = 0b01; // 0b01 means block/page descriptor
+        let mut desc: u64 = 0b11; // First 1 means page, second 1 means valid
         desc |= (page_addr & addr_mask()) as u64;
         PageDescriptor(desc)
     }
@@ -74,6 +78,10 @@ impl PageDescriptor {
 
     pub fn invalid() -> PageDescriptor {
         PageDescriptor(0)
+    }
+
+    pub fn value(&self) -> u64 {
+        self.0
     }
 }
 
@@ -153,13 +161,37 @@ impl PageTables {
         use cortex_a::{asm::barrier::*, registers::*};
         const VIRT_BITS: u64 = 48;
 
+        unsafe { dsb(SY) };
+
+        // Setup TTBR0_EL1
         TTBR0_EL1.set(self.l0_table.as_ptr() as u64);
+
+        // Now do an ISB to force these changes to be seen
+        unsafe { isb(SY) };
+
+        // Setup MAIR
+        MAIR_EL1.modify(
+            MAIR_EL1::Attr0_Device::nonGathering_nonReordering_noEarlyWriteAck
+                + MAIR_EL1::Attr1_Normal_Inner::NonCacheable
+                + MAIR_EL1::Attr1_Normal_Outer::NonCacheable
+                + MAIR_EL1::Attr2_Normal_Inner::WriteBack_NonTransient_ReadWriteAlloc
+                + MAIR_EL1::Attr2_Normal_Outer::WriteBack_NonTransient_ReadWriteAlloc
+                + MAIR_EL1::Attr3_Normal_Inner::WriteThrough_NonTransient_ReadWriteAlloc
+                + MAIR_EL1::Attr3_Normal_Outer::WriteThrough_NonTransient_ReadWriteAlloc
+                + MAIR_EL1::Attr4_Device::nonGathering_nonReordering_EarlyWriteAck,
+        );
 
         // Virtual address size is 48 bits
         TCR_EL1.modify(TCR_EL1::T0SZ.val(64 - VIRT_BITS) + TCR_EL1::T1SZ.val(64 - VIRT_BITS));
         // Translation granule is 4K
         TCR_EL1.modify(TCR_EL1::TG0::KiB_4 + TCR_EL1::TG1::KiB_4);
-        // TODO: Set caching attributes
+        // Caching attributes
+        TCR_EL1.modify(
+            TCR_EL1::IRGN0::WriteBack_ReadAlloc_WriteAlloc_Cacheable
+                + TCR_EL1::IRGN1::WriteBack_ReadAlloc_WriteAlloc_Cacheable
+                + TCR_EL1::ORGN0::WriteBack_ReadAlloc_WriteAlloc_Cacheable
+                + TCR_EL1::ORGN0::WriteBack_ReadAlloc_WriteAlloc_Cacheable,
+        );
         // TODO: Set SMP attributes
 
         // Set PA range
@@ -182,11 +214,11 @@ impl PageTables {
         const HD_SHIFT: u64 = 40;
         let mut tcr_el1_val = TCR_EL1.get();
         match hw_af_db_support() {
-            AfAndDbSupport::AfSupported => {
+            AfAndDbSupport::Af => {
                 tcr_el1_val |= 1 << HA_SHIFT;
                 TCR_EL1.set(tcr_el1_val);
             }
-            AfAndDbSupport::AfAndDbSupported => {
+            AfAndDbSupport::AfAndDb => {
                 tcr_el1_val |= 1 << HA_SHIFT;
                 tcr_el1_val |= 1 << HD_SHIFT;
                 TCR_EL1.set(tcr_el1_val);
@@ -198,10 +230,47 @@ impl PageTables {
         unsafe { isb(SY) };
 
         // Enable MMU with SCTLR_EL1
-        SCTLR_EL1.modify(SCTLR_EL1::M::Enable);
+        SCTLR_EL1.modify(SCTLR_EL1::M::Enable + SCTLR_EL1::C::Cacheable + SCTLR_EL1::I::Cacheable);
 
         // Now do an ISB to force these changes to be seen
         unsafe { isb(SY) };
+    }
+
+    pub fn virt_to_phy(&self, addr: usize) -> usize {
+        const L0_IDX_MASK: usize = 0x0000_FF10_0000_0000;
+        const L0_IDX_SHIFT: usize = 39;
+
+        const L1_IDX_MASK: usize = 0x0000_007F_C000_0000;
+        const L1_IDX_SHIFT: usize = 30;
+
+        const L2_IDX_MASK: usize = 0x0000_0000_3FE0_0000;
+        const L2_IDX_SHIFT: usize = 21;
+
+        const L3_IDX_MASK: usize = 0x0000_0000_001F_F000;
+        const L3_IDX_SHIFT: usize = 12;
+
+        const PAGE_OFFSET_MASK: usize = 0x0000_0000_0000_0FFF;
+
+        let l0_idx = (addr & L0_IDX_MASK) >> L0_IDX_SHIFT;
+        let l1_idx = (addr & L1_IDX_MASK) >> L1_IDX_SHIFT;
+        let l2_idx = (addr & L2_IDX_MASK) >> L2_IDX_SHIFT;
+        let l3_idx = (addr & L3_IDX_MASK) >> L3_IDX_SHIFT;
+
+        let l0_entry = self.l0_table[l0_idx];
+        let l1_table_addr = l0_entry.value() as usize & addr_mask();
+        let l1_entry =
+            unsafe { core::ptr::read((l1_table_addr + l1_idx * 8) as *const TableDescriptor) };
+        let l2_table_addr = l1_entry.value() as usize & addr_mask();
+        let l2_entry =
+            unsafe { core::ptr::read((l2_table_addr + l2_idx * 8) as *const TableDescriptor) };
+        let l3_table_addr = l2_entry.value() as usize & addr_mask();
+        let l3_entry =
+            unsafe { core::ptr::read((l3_table_addr + l3_idx * 8) as *const PageDescriptor) };
+
+        let page_addr = l3_entry.value() as usize & addr_mask();
+        let page_off = addr & PAGE_OFFSET_MASK;
+
+        page_addr + page_off
     }
 }
 
@@ -212,17 +281,17 @@ fn id_aa64mmfr1_el1() -> u64 {
 }
 
 enum AfAndDbSupport {
-    NotSupported,
-    AfSupported,
-    AfAndDbSupported,
+    None,
+    Af,
+    AfAndDb,
 }
 
 fn hw_af_db_support() -> AfAndDbSupport {
     const HAFDBS_MASK: u64 = 0b1111;
     match id_aa64mmfr1_el1() & HAFDBS_MASK {
-        0b0000 => AfAndDbSupport::NotSupported,
-        0b0001 => AfAndDbSupport::AfSupported,
-        0b0010 => AfAndDbSupport::AfAndDbSupported,
+        0b0000 => AfAndDbSupport::None,
+        0b0001 => AfAndDbSupport::Af,
+        0b0010 => AfAndDbSupport::AfAndDb,
         _ => unreachable!("invalid value for HAFDBS field of ID_AA64MMFF1_EL1"),
     }
 }

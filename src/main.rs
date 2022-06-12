@@ -42,7 +42,7 @@ fn kernel_main() -> ! {
     let mut page_tables =
         PageTables::new(l0_pt_start(), l1_pt_start(), l2_pt_start(), l3_pt_start());
     setup_identity_map(&mut page_tables);
-    page_tables.load();
+    // page_tables.load();
 
     let sp: usize;
     unsafe { core::arch::asm!("mov {x}, sp", x = out(reg) sp) };

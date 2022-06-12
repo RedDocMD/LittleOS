@@ -61,7 +61,7 @@ _start:
 // EL2 Exception vector
 // Currently, we only need el2_curr_el_spx_synch
 // This needs to be at an offest of 0x200
-.align 7
+.align 12
 el2_exception_vector:
 // All this handler is used for is to jump back to EL1
 // So, it overwrites bits [3:0] to 0b0101 so that we go

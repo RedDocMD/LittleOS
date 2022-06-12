@@ -19,6 +19,14 @@ run: $(IMG)
 	qemu-system-aarch64 -kernel $(IMG) -machine raspi3ap \
 		-display none -serial none -serial stdio
 
+debug: $(IMG)
+	qemu-system-aarch64 -kernel $(IMG) -machine raspi3ap \
+		-display none -serial none -serial stdio -s -S
+
+monitor: $(IMG)
+	qemu-system-aarch64 -kernel $(IMG) -machine raspi3ap \
+		-display none -serial none -serial none -monitor stdio
+
 $(IMG): $(ELF)
 	rust-objcopy -O binary --strip-all $(ELF) $(IMG)
 
