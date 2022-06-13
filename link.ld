@@ -44,22 +44,33 @@ SECTIONS
 
     .data : { *(.data*) } :segment_data
 
-    /* Place the page tables in memory */
+    /* Place the TTBR0 page tables in memory */
     . = ALIGN(__page_size);
-    __l0_pt_start = .;
+    __ttbr0_l1_pt_start = .;
 
     . += __page_size;
-    __l1_pt_start = .;
+    __ttbr0_l2_pt_start = .;
 
     . += __page_size;
-    __l2_pt_start = .;
-
-    . += __page_size;
-    __l3_pt_start = .;
+    __ttbr0_l3_pt_start = .;
 
     /* Mark where page tables end */
     . += __l3_pt_cnt * __page_size;
-    __pt_end = .;
+    __ttbr0_pt_end = .;
+
+    /* Place the TTBR1 page tables in memory */
+    . = ALIGN(__page_size);
+    __ttbr1_l1_pt_start = .;
+
+    . += __page_size;
+    __ttbr1_l2_pt_start = .;
+
+    . += __page_size;
+    __ttbr1_l3_pt_start = .;
+
+    /* Mark where page tables end */
+    . += __l3_pt_cnt * __page_size;
+    __ttbr1_pt_end = .;
 
     /* This page is used to store the bitmap of the boot allocator */
     . += __page_size;

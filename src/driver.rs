@@ -3,7 +3,7 @@ use self::{mini_uart::MINI_UART, qemu::QEMU_OUTPUT, uart::PL011_UART};
 pub mod gpio;
 pub mod mini_uart;
 pub mod mmio;
-mod qemu;
+pub mod qemu;
 pub mod uart;
 
 pub fn console() -> &'static impl crate::print::Write {

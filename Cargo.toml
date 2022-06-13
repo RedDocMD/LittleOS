@@ -17,3 +17,5 @@ bench = false
 tock-registers = { version = "0.7.0", default-features = false, features = ["register_types"] }
 cortex-a = { version = "7.2.0" } 
 bitvec = { version = "1.0.0", default-features = false }
+bitfield = "0.13.2"
+num_enum = { version = "0.5.7", default-features = false }

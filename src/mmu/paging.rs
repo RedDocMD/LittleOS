@@ -1,7 +1,8 @@
 use core::mem::{self, MaybeUninit};
 use core::ptr;
 
-use tock_registers::interfaces::{ReadWriteable, Readable, Writeable};
+use bitfield::bitfield;
+use num_enum::IntoPrimitive;
 
 use crate::mmu::page_size_order;
 
@@ -16,9 +17,17 @@ fn addr_mask() -> usize {
     mask
 }
 
-#[repr(transparent)]
-#[derive(Clone, Copy)]
-pub struct TableDescriptor(u64);
+bitfield! {
+    #[derive(Clone, Copy)]
+    #[repr(transparent)]
+    pub struct TableDescriptor(u64);
+    impl Debug;
+
+    pub _, set_ns: 63;
+    pub u8, from into AccessPermission, _, set_ap: 62, 61;
+    pub _, set_xn: 60;
+    pub _, set_pxn: 59;
+}
 
 impl TableDescriptor {
     pub fn new(table_addr: usize) -> TableDescriptor {
@@ -30,22 +39,45 @@ impl TableDescriptor {
     pub fn invalid() -> TableDescriptor {
         TableDescriptor(0)
     }
-
-    pub fn value(&self) -> u64 {
-        self.0
-    }
 }
 
-#[repr(transparent)]
-#[derive(Clone, Copy)]
-pub struct PageDescriptor(u64);
+bitfield! {
+    #[derive(Clone, Copy)]
+    #[repr(transparent)]
+    pub struct PageDescriptor(u64);
+    impl Debug;
 
+    pub _, set_xn: 54;
+    pub _, set_pxn: 53;
+    pub _, set_af: 10;
+    pub u8, from into Shareability, _, set_sh: 9, 8;
+    pub u8, from into AccessPermission, _, set_ap: 7, 6;
+    pub u8, from into MemAttrIdx, _, set_attr_idx: 4, 2;
+}
+
+#[derive(IntoPrimitive, Clone, Copy)]
+#[repr(u8)]
+pub enum Shareability {
+    None = 0b00,
+    Outer = 0b10,
+    Inner = 0b11,
+}
+
+#[derive(IntoPrimitive, Clone, Copy)]
 #[repr(u8)]
 pub enum AccessPermission {
     PrivilegedReadWrite = 0b00,
     ReadWrite = 0b01,
     PrivilegedReadOnly = 0b10,
     ReadOnly = 0b11,
+}
+
+#[derive(IntoPrimitive, Clone, Copy)]
+#[repr(u8)]
+pub enum MemAttrIdx {
+    Normal = 0,
+    Device = 1,
+    NonCacheable = 2,
 }
 
 impl PageDescriptor {
@@ -55,33 +87,8 @@ impl PageDescriptor {
         PageDescriptor(desc)
     }
 
-    pub fn with_xn(mut self, val: bool) -> PageDescriptor {
-        const XN_OFF: usize = 54;
-        self.0 &= !(1 << XN_OFF);
-        self.0 |= (val as u64) << XN_OFF;
-        self
-    }
-
-    pub fn with_pxn(mut self, val: bool) -> PageDescriptor {
-        const PXN_OFF: usize = 53;
-        self.0 &= !(1 << PXN_OFF);
-        self.0 |= (val as u64) << PXN_OFF;
-        self
-    }
-
-    pub fn with_ap(mut self, ap: AccessPermission) -> PageDescriptor {
-        const AP_OFF: usize = 6;
-        self.0 &= !(0b11 << AP_OFF);
-        self.0 |= ((ap as u64) & 0b11) << AP_OFF;
-        self
-    }
-
     pub fn invalid() -> PageDescriptor {
         PageDescriptor(0)
-    }
-
-    pub fn value(&self) -> u64 {
-        self.0
     }
 }
 
@@ -91,20 +98,14 @@ type HigherTable = &'static mut [TableDescriptor];
 const L3_TABLES_COUNT: usize = 256;
 
 pub struct PageTables {
-    l0_table: HigherTable,
     l1_table: HigherTable,
     l2_table: HigherTable,
     l3_tables: [PageTable; L3_TABLES_COUNT],
 }
 
 impl PageTables {
-    pub fn new(l0_addr: usize, l1_addr: usize, l2_addr: usize, l3_addr: usize) -> PageTables {
+    pub fn new(l1_addr: usize, l2_addr: usize, l3_addr: usize) -> PageTables {
         const ENTRIES_PER_TABLE: usize = 512;
-
-        let l0_table_ptr =
-            ptr::slice_from_raw_parts_mut(l0_addr as *mut TableDescriptor, ENTRIES_PER_TABLE);
-        let l0_table = unsafe { &mut *l0_table_ptr };
-        fill_with_invalid_table_entries(l0_table);
 
         let l1_table_ptr =
             ptr::slice_from_raw_parts_mut(l1_addr as *mut TableDescriptor, ENTRIES_PER_TABLE);
@@ -134,165 +135,34 @@ impl PageTables {
         };
 
         PageTables {
-            l0_table,
             l1_table,
             l2_table,
             l3_tables,
         }
     }
 
-    pub fn l0_table(&mut self) -> &mut [TableDescriptor] {
-        self.l0_table
-    }
-
-    pub fn l1_table(&mut self) -> &mut [TableDescriptor] {
+    pub fn l1_table_mut(&mut self) -> &mut [TableDescriptor] {
         self.l1_table
     }
 
-    pub fn l2_table(&mut self) -> &mut [TableDescriptor] {
+    pub fn l2_table_mut(&mut self) -> &mut [TableDescriptor] {
         self.l2_table
     }
 
-    pub fn l3_table(&mut self, idx: usize) -> &mut [PageDescriptor] {
+    pub fn l3_table_mut(&mut self, idx: usize) -> &mut [PageDescriptor] {
         &mut self.l3_tables[idx]
     }
 
-    pub fn load(&self) {
-        use cortex_a::{asm::barrier::*, registers::*};
-        const VIRT_BITS: u64 = 48;
-
-        unsafe { dsb(SY) };
-
-        // Setup TTBR0_EL1
-        TTBR0_EL1.set(self.l0_table.as_ptr() as u64);
-
-        // Now do an ISB to force these changes to be seen
-        unsafe { isb(SY) };
-
-        // Setup MAIR
-        MAIR_EL1.modify(
-            MAIR_EL1::Attr0_Device::nonGathering_nonReordering_noEarlyWriteAck
-                + MAIR_EL1::Attr1_Normal_Inner::NonCacheable
-                + MAIR_EL1::Attr1_Normal_Outer::NonCacheable
-                + MAIR_EL1::Attr2_Normal_Inner::WriteBack_NonTransient_ReadWriteAlloc
-                + MAIR_EL1::Attr2_Normal_Outer::WriteBack_NonTransient_ReadWriteAlloc
-                + MAIR_EL1::Attr3_Normal_Inner::WriteThrough_NonTransient_ReadWriteAlloc
-                + MAIR_EL1::Attr3_Normal_Outer::WriteThrough_NonTransient_ReadWriteAlloc
-                + MAIR_EL1::Attr4_Device::nonGathering_nonReordering_EarlyWriteAck,
-        );
-
-        // Virtual address size is 48 bits
-        TCR_EL1.modify(TCR_EL1::T0SZ.val(64 - VIRT_BITS) + TCR_EL1::T1SZ.val(64 - VIRT_BITS));
-        // Translation granule is 4K
-        TCR_EL1.modify(TCR_EL1::TG0::KiB_4 + TCR_EL1::TG1::KiB_4);
-        // Caching attributes
-        TCR_EL1.modify(
-            TCR_EL1::IRGN0::WriteBack_ReadAlloc_WriteAlloc_Cacheable
-                + TCR_EL1::IRGN1::WriteBack_ReadAlloc_WriteAlloc_Cacheable
-                + TCR_EL1::ORGN0::WriteBack_ReadAlloc_WriteAlloc_Cacheable
-                + TCR_EL1::ORGN0::WriteBack_ReadAlloc_WriteAlloc_Cacheable,
-        );
-        // TODO: Set SMP attributes
-
-        // Set PA range
-        TCR_EL1.modify(TCR_EL1::IPS.val(ID_AA64MMFR0_EL1.read(ID_AA64MMFR0_EL1::PARange)));
-        // Set ASID bits (8 or 16)
-        match ID_AA64MMFR0_EL1
-            .read_as_enum::<ID_AA64MMFR0_EL1::ASIDBits::Value>(ID_AA64MMFR0_EL1::ASIDBits)
-        {
-            Some(ID_AA64MMFR0_EL1::ASIDBits::Value::Bits_16) => {
-                TCR_EL1.modify(TCR_EL1::AS::ASID16Bits)
-            }
-            Some(ID_AA64MMFR0_EL1::ASIDBits::Value::Bits_8) => {
-                TCR_EL1.modify(TCR_EL1::AS::ASID8Bits)
-            }
-            None => crate::kprintln!("Failed to retrieve ASID bit count"),
-        }
-
-        // Check if we have AF and dirty bit support
-        const HA_SHIFT: u64 = 39;
-        const HD_SHIFT: u64 = 40;
-        let mut tcr_el1_val = TCR_EL1.get();
-        match hw_af_db_support() {
-            AfAndDbSupport::Af => {
-                tcr_el1_val |= 1 << HA_SHIFT;
-                TCR_EL1.set(tcr_el1_val);
-            }
-            AfAndDbSupport::AfAndDb => {
-                tcr_el1_val |= 1 << HA_SHIFT;
-                tcr_el1_val |= 1 << HD_SHIFT;
-                TCR_EL1.set(tcr_el1_val);
-            }
-            _ => {}
-        }
-
-        // Now do an ISB to force these changes to be seen
-        unsafe { isb(SY) };
-
-        // Enable MMU with SCTLR_EL1
-        SCTLR_EL1.modify(SCTLR_EL1::M::Enable + SCTLR_EL1::C::Cacheable + SCTLR_EL1::I::Cacheable);
-
-        // Now do an ISB to force these changes to be seen
-        unsafe { isb(SY) };
+    pub fn l1_table(&self) -> &[TableDescriptor] {
+        self.l1_table
     }
 
-    pub fn virt_to_phy(&self, addr: usize) -> usize {
-        const L0_IDX_MASK: usize = 0x0000_FF10_0000_0000;
-        const L0_IDX_SHIFT: usize = 39;
-
-        const L1_IDX_MASK: usize = 0x0000_007F_C000_0000;
-        const L1_IDX_SHIFT: usize = 30;
-
-        const L2_IDX_MASK: usize = 0x0000_0000_3FE0_0000;
-        const L2_IDX_SHIFT: usize = 21;
-
-        const L3_IDX_MASK: usize = 0x0000_0000_001F_F000;
-        const L3_IDX_SHIFT: usize = 12;
-
-        const PAGE_OFFSET_MASK: usize = 0x0000_0000_0000_0FFF;
-
-        let l0_idx = (addr & L0_IDX_MASK) >> L0_IDX_SHIFT;
-        let l1_idx = (addr & L1_IDX_MASK) >> L1_IDX_SHIFT;
-        let l2_idx = (addr & L2_IDX_MASK) >> L2_IDX_SHIFT;
-        let l3_idx = (addr & L3_IDX_MASK) >> L3_IDX_SHIFT;
-
-        let l0_entry = self.l0_table[l0_idx];
-        let l1_table_addr = l0_entry.value() as usize & addr_mask();
-        let l1_entry =
-            unsafe { core::ptr::read((l1_table_addr + l1_idx * 8) as *const TableDescriptor) };
-        let l2_table_addr = l1_entry.value() as usize & addr_mask();
-        let l2_entry =
-            unsafe { core::ptr::read((l2_table_addr + l2_idx * 8) as *const TableDescriptor) };
-        let l3_table_addr = l2_entry.value() as usize & addr_mask();
-        let l3_entry =
-            unsafe { core::ptr::read((l3_table_addr + l3_idx * 8) as *const PageDescriptor) };
-
-        let page_addr = l3_entry.value() as usize & addr_mask();
-        let page_off = addr & PAGE_OFFSET_MASK;
-
-        page_addr + page_off
+    pub fn l2_table(&self) -> &[TableDescriptor] {
+        self.l2_table
     }
-}
 
-fn id_aa64mmfr1_el1() -> u64 {
-    let id: u64;
-    unsafe { core::arch::asm!("mrs {x}, ID_AA64MMFR1_EL1", x = out(reg) id) };
-    id
-}
-
-enum AfAndDbSupport {
-    None,
-    Af,
-    AfAndDb,
-}
-
-fn hw_af_db_support() -> AfAndDbSupport {
-    const HAFDBS_MASK: u64 = 0b1111;
-    match id_aa64mmfr1_el1() & HAFDBS_MASK {
-        0b0000 => AfAndDbSupport::None,
-        0b0001 => AfAndDbSupport::Af,
-        0b0010 => AfAndDbSupport::AfAndDb,
-        _ => unreachable!("invalid value for HAFDBS field of ID_AA64MMFF1_EL1"),
+    pub fn l3_table(&self, idx: usize) -> &[PageDescriptor] {
+        self.l3_tables[idx]
     }
 }
 
