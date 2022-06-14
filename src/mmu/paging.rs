@@ -1,29 +1,22 @@
-use core::mem::{self, MaybeUninit};
-use core::ptr;
-
 use bitfield::bitfield;
 use num_enum::IntoPrimitive;
 
-use crate::mmu::page_size_order;
-
-use super::page_size;
+use crate::mmu::PAGE_SIZE_ORDER;
 
 #[inline(always)]
 fn addr_mask() -> usize {
     let mut mask: usize = !0;
     const TOP_MASK: usize = 0xFFFF_0000_0000_0000;
     mask &= !TOP_MASK;
-    mask &= !((1 << page_size_order()) - 1);
+    mask &= !((1 << PAGE_SIZE_ORDER) - 1);
     mask
 }
 
 bitfield! {
     #[derive(Clone, Copy)]
-    #[repr(transparent)]
     pub struct TableDescriptor(u64);
     impl Debug;
 
-    pub _, set_ns: 63;
     pub u8, from into AccessPermission, _, set_ap: 62, 61;
     pub _, set_xn: 60;
     pub _, set_pxn: 59;
@@ -41,9 +34,14 @@ impl TableDescriptor {
     }
 }
 
+impl From<TableDescriptor> for u64 {
+    fn from(td: TableDescriptor) -> Self {
+        td.0
+    }
+}
+
 bitfield! {
     #[derive(Clone, Copy)]
-    #[repr(transparent)]
     pub struct PageDescriptor(u64);
     impl Debug;
 
@@ -92,88 +90,40 @@ impl PageDescriptor {
     }
 }
 
-type PageTable = &'static mut [PageDescriptor];
-type HigherTable = &'static mut [TableDescriptor];
-
-const L3_TABLES_COUNT: usize = 256;
-
-pub struct PageTables {
-    l1_table: HigherTable,
-    l2_table: HigherTable,
-    l3_tables: [PageTable; L3_TABLES_COUNT],
-}
-
-impl PageTables {
-    pub fn new(l1_addr: usize, l2_addr: usize, l3_addr: usize) -> PageTables {
-        const ENTRIES_PER_TABLE: usize = 512;
-
-        let l1_table_ptr =
-            ptr::slice_from_raw_parts_mut(l1_addr as *mut TableDescriptor, ENTRIES_PER_TABLE);
-        let l1_table = unsafe { &mut *l1_table_ptr };
-        fill_with_invalid_table_entries(l1_table);
-
-        let l2_table_ptr =
-            ptr::slice_from_raw_parts_mut(l2_addr as *mut TableDescriptor, ENTRIES_PER_TABLE);
-        let l2_table = unsafe { &mut *l2_table_ptr };
-        fill_with_invalid_table_entries(l2_table);
-
-        let l3_tables = {
-            let mut l3_tables: [MaybeUninit<PageTable>; L3_TABLES_COUNT] =
-                unsafe { MaybeUninit::uninit().assume_init() };
-            for (i, uninit_l3_table) in l3_tables.iter_mut().enumerate() {
-                let l3_table_addr = l3_addr + i * page_size();
-                let l3_table_ptr = ptr::slice_from_raw_parts_mut(
-                    l3_table_addr as *mut PageDescriptor,
-                    ENTRIES_PER_TABLE,
-                );
-                let l3_table = unsafe { &mut *l3_table_ptr };
-                fill_with_invalid_page_entries(l3_table);
-
-                uninit_l3_table.write(l3_table);
-            }
-            unsafe { mem::transmute(l3_tables) }
-        };
-
-        PageTables {
-            l1_table,
-            l2_table,
-            l3_tables,
-        }
-    }
-
-    pub fn l1_table_mut(&mut self) -> &mut [TableDescriptor] {
-        self.l1_table
-    }
-
-    pub fn l2_table_mut(&mut self) -> &mut [TableDescriptor] {
-        self.l2_table
-    }
-
-    pub fn l3_table_mut(&mut self, idx: usize) -> &mut [PageDescriptor] {
-        &mut self.l3_tables[idx]
-    }
-
-    pub fn l1_table(&self) -> &[TableDescriptor] {
-        self.l1_table
-    }
-
-    pub fn l2_table(&self) -> &[TableDescriptor] {
-        self.l2_table
-    }
-
-    pub fn l3_table(&self, idx: usize) -> &[PageDescriptor] {
-        self.l3_tables[idx]
+impl From<PageDescriptor> for u64 {
+    fn from(pd: PageDescriptor) -> Self {
+        pd.0
     }
 }
 
-fn fill_with_invalid_table_entries(table: &mut [TableDescriptor]) {
-    for el in table.iter_mut() {
-        *el = TableDescriptor::invalid();
+bitfield! {
+    #[derive(Clone, Copy)]
+    pub struct BlockDescriptor(u64);
+    impl Debug;
+
+    pub _, set_xn: 54;
+    pub _, set_pxn: 53;
+    pub _, set_af: 10;
+    pub u8, from into Shareability, _, set_sh: 9, 8;
+    pub u8, from into AccessPermission, _, set_ap: 7, 6;
+    pub u8, from into MemAttrIdx, _, set_attr_idx: 4, 2;
+}
+
+impl BlockDescriptor {
+    pub fn invalid() -> BlockDescriptor {
+        BlockDescriptor(0)
+    }
+
+    pub fn level2(block_addr: usize) -> BlockDescriptor {
+        let mut desc: u64 = 0b01; // First 0 means block, second 1 means valid
+        const L2_ADDR_MASK: usize = 0x0000_FFFF_FFE0_0000;
+        desc |= (block_addr & L2_ADDR_MASK) as u64;
+        BlockDescriptor(desc)
     }
 }
 
-fn fill_with_invalid_page_entries(table: &mut [PageDescriptor]) {
-    for el in table.iter_mut() {
-        *el = PageDescriptor::invalid();
+impl From<BlockDescriptor> for u64 {
+    fn from(bd: BlockDescriptor) -> Self {
+        bd.0
     }
 }

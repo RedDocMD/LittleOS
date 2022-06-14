@@ -3,7 +3,7 @@ __rpi_phys_binary_load_addr = 0x80000;
 
 ENTRY(__rpi_phys_binary_load_addr)
 
-__l3_pt_cnt = 256;
+PAGE_SIZE = 4k;
 
 PHDRS
 {
@@ -33,47 +33,23 @@ SECTIONS
 
     .rodata : ALIGN(8) {
         *(.rodata*);
-        __page_size_order = 12;
-        __page_size = 1 << __page_size_order;
     } :segment_code
 
     .got : ALIGN(8) { *(.got) } :segment_code
 
-    . = ALIGN(__page_size);
+    . = ALIGN(PAGE_SIZE);
     __code_end = .;
 
     .data : { *(.data*) } :segment_data
 
     /* Place the TTBR0 page tables in memory */
-    . = ALIGN(__page_size);
-    __ttbr0_l1_pt_start = .;
-
-    . += __page_size;
-    __ttbr0_l2_pt_start = .;
-
-    . += __page_size;
-    __ttbr0_l3_pt_start = .;
-
-    /* Mark where page tables end */
-    . += __l3_pt_cnt * __page_size;
-    __ttbr0_pt_end = .;
-
-    /* Place the TTBR1 page tables in memory */
-    . = ALIGN(__page_size);
-    __ttbr1_l1_pt_start = .;
-
-    . += __page_size;
-    __ttbr1_l2_pt_start = .;
-
-    . += __page_size;
-    __ttbr1_l3_pt_start = .;
-
-    /* Mark where page tables end */
-    . += __l3_pt_cnt * __page_size;
-    __ttbr1_pt_end = .;
-
+    . = ALIGN(PAGE_SIZE);
+    __ttbr0_el1_start = .;
+    . += 3 * PAGE_SIZE;
+    
+    __boot_alloc_bitmap_start = .;
     /* This page is used to store the bitmap of the boot allocator */
-    . += __page_size;
+    . += PAGE_SIZE;
     /* Thereafter, we have the memory of the boot allocator */
     __boot_alloc_start = .;
 

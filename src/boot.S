@@ -22,11 +22,30 @@ _start:
 
 	// If execution reaches here, it is the boot core.
 
-	// Initialize EL2 vector table
-	ADR_REL x0, el2_exception_vector
-	msr VBAR_EL2, x0
+    mrs     x0, CurrentEL
+    and     x0, x0, #12 // clear reserved bits
+	cmp     x0, #4
+    beq     .L_init_dram
+    msr     sp_el1, x1
+    // enable CNTP for EL1
+    mrs     x0, CNTHCTL_EL2
+    orr     x0, x0, #3
+    msr     CNTHCTL_EL2, x0
+    msr     CNTVOFF_EL2, xzr
+    // enable AArch64 in EL1
+    mov     x0, #(1 << 31)      // AArch64
+    orr     x0, x0, #(1 << 1)   // SWIO hardwired on Pi3
+    msr     HCR_EL2, x0
+    mrs     x0, HCR_EL2
+    // change execution level to EL1
+    mov     x2, #0x3c4
+    msr     SPSR_EL2, x2
+    adr     x2, .L_init_dram
+    msr     ELR_EL2, x2
+    eret
 
 	// Initialize DRAM.
+.L_init_dram:
 	ADR_REL	x0, __bss_start
 	ADR_REL x1, __bss_end_exclusive
 
@@ -42,9 +61,6 @@ _start:
 	ADR_REL	x0, __boot_core_stack_end_exclusive
 	mov	sp, x0
 
-	// Move from EL2 to EL1
-	hvc 1 // This number could be anything
-
 	// Jump to Rust code.
 	b	_start_rust
 
@@ -56,25 +72,3 @@ _start:
 .size	_start, . - _start
 .type	_start, function
 .global	_start
-
-
-// EL2 Exception vector
-// Currently, we only need el2_curr_el_spx_synch
-// This needs to be at an offest of 0x200
-.align 12
-el2_exception_vector:
-// All this handler is used for is to jump back to EL1
-// So, it overwrites bits [3:0] to 0b0101 so that we go
-// to EL1 on return but retain the same stack as before.
-// Also, set SP_EL1 to correct sp before returning.
-.zero 0x200
-el2_curr_el_spx_synch:
-	str x0, [sp, -16]!
-	mrs x0, SPSR_EL2
-	and x0, x0, 0xFFFFFFFFFFFFFFF0
-	add x0, x0, 0b0101
-	msr SPSR_EL2, x0
-	ldr x0, [sp], 16
-	mov x0, sp
-	msr SP_EL1, x0
-	eret

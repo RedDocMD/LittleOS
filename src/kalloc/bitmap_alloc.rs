@@ -6,7 +6,7 @@ use core::{
 
 use crate::{
     kalloc::{AllocError, Allocator, Layout},
-    mmu::{align_up, is_aligned, page_size},
+    mmu::{align_up, is_aligned, PAGE_SIZE},
 };
 
 use bitvec::slice::BitSlice;
@@ -28,10 +28,10 @@ struct LastPage {
 impl BitmapAllocator {
     pub fn new(addr: usize, base: usize) -> Self {
         const BOOT_ALLOC_SPACE: usize = 16 * (1 << 20);
-        let boot_alloc_page_count: usize = BOOT_ALLOC_SPACE / page_size();
-        let bitmap_len: usize = boot_alloc_page_count / 8;
+        const BOOT_ALLOC_PAGE_COUNT: usize = BOOT_ALLOC_SPACE / PAGE_SIZE;
+        const BITMAP_LEN: usize = BOOT_ALLOC_PAGE_COUNT / 8;
 
-        let slice_ptr = ptr::slice_from_raw_parts_mut(addr as *mut u64, bitmap_len);
+        let slice_ptr = ptr::slice_from_raw_parts_mut(addr as *mut u64, BITMAP_LEN);
         let slice = unsafe { &mut *slice_ptr };
         let bitmap = BitSlice::from_slice_mut(slice);
         bitmap.fill(false);
@@ -52,12 +52,12 @@ unsafe impl Allocator for BitmapAllocator {
     fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
         let size = layout.size();
         let alignment = layout.align();
-        if alignment > page_size() {
-            unimplemented!("Cannot handle alignment greater than {}", page_size());
+        if alignment > PAGE_SIZE {
+            unimplemented!("Cannot handle alignment greater than {}", PAGE_SIZE);
         }
         let actual_size = align_up(size, alignment);
-        let page_cnt = align_up(actual_size, page_size()) / page_size();
-        let residual_size = page_cnt * page_size() - actual_size;
+        let page_cnt = align_up(actual_size, PAGE_SIZE) / PAGE_SIZE;
+        let residual_size = page_cnt * PAGE_SIZE - actual_size;
 
         let page_idx = find_page_idx(&self.page_map.borrow(), page_cnt);
         if let Some(page_idx) = page_idx {
@@ -82,7 +82,7 @@ unsafe impl Allocator for BitmapAllocator {
                         self.last_page.set(None);
                     }
                     Ordering::Greater => {
-                        let new_residual_size = page_size() - (shift - residual_size);
+                        let new_residual_size = PAGE_SIZE - (shift - residual_size);
                         self.last_page.set(Some(LastPage {
                             idx: page_idx + page_cnt - 2,
                             off: new_residual_size,
@@ -90,7 +90,7 @@ unsafe impl Allocator for BitmapAllocator {
                     }
                 }
 
-                let addr = self.base + page_idx * page_size() - shift;
+                let addr = self.base + page_idx * PAGE_SIZE - shift;
                 let ptr = ptr::slice_from_raw_parts_mut(addr as *mut u8, size);
                 return Ok(NonNull::new(ptr).unwrap());
             }
@@ -106,7 +106,7 @@ unsafe impl Allocator for BitmapAllocator {
                 self.last_page.set(None);
             }
 
-            let addr = self.base + page_idx * page_size();
+            let addr = self.base + page_idx * PAGE_SIZE;
             let ptr = ptr::slice_from_raw_parts_mut(addr as *mut u8, size);
             return Ok(NonNull::new(ptr).unwrap());
         }
@@ -116,25 +116,25 @@ unsafe impl Allocator for BitmapAllocator {
     unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: Layout) {
         let size = layout.size();
         let alignment = layout.align();
-        if alignment > page_size() {
-            unreachable!("Cannot handle alignment greater than {}", page_size());
+        if alignment > PAGE_SIZE {
+            unreachable!("Cannot handle alignment greater than {}", PAGE_SIZE);
         }
         let actual_size = align_up(size, alignment);
         let start_addr = ptr.as_ptr() as usize;
-        if !is_aligned(start_addr, page_size()) {
+        if !is_aligned(start_addr, PAGE_SIZE) {
             // This means we were squeezed partially into the last page.
             // Leave that as allocated.
-            let next_page_addr = align_up(start_addr, page_size());
+            let next_page_addr = align_up(start_addr, PAGE_SIZE);
             let shift = next_page_addr - start_addr;
             let new_actual_size = actual_size - shift;
-            let new_page_cnt = new_actual_size / page_size();
+            let new_page_cnt = new_actual_size / PAGE_SIZE;
             let mut bitmap = self.page_map.borrow_mut();
             if new_page_cnt > 0 {
-                let new_page_idx = (next_page_addr - self.base) / page_size();
+                let new_page_idx = (next_page_addr - self.base) / PAGE_SIZE;
                 bitmap[new_page_idx..(new_page_idx + new_page_cnt)].fill(false);
                 // TODO: Put better logic for last_page update
             } else if let Some(last_page) = self.last_page() {
-                let page_idx = (start_addr - self.base) / page_size();
+                let page_idx = (start_addr - self.base) / PAGE_SIZE;
                 if last_page.idx == page_idx && last_page.off == start_addr + actual_size {
                     self.last_page.set(Some(LastPage {
                         idx: last_page.idx,
@@ -144,12 +144,12 @@ unsafe impl Allocator for BitmapAllocator {
             }
         } else {
             // If the last page was partially allocated, leave it marked as allocated.
-            let page_cnt = actual_size / page_size();
-            let page_idx = (start_addr - self.base) / page_size();
+            let page_cnt = actual_size / PAGE_SIZE;
+            let page_idx = (start_addr - self.base) / PAGE_SIZE;
             let mut bitmap = self.page_map.borrow_mut();
             if page_cnt > 0 {
                 bitmap[page_idx..(page_idx + page_cnt)].fill(false);
-                let residual_size = actual_size - page_cnt * page_size();
+                let residual_size = actual_size - page_cnt * PAGE_SIZE;
                 if residual_size > 0 {
                     let last_page_idx = page_idx + page_cnt;
                     if let Some(last_page) = self.last_page() {
@@ -186,11 +186,9 @@ fn shift_from_last_page(
 ) -> Option<usize> {
     if let Some(last_page) = last_page {
         if last_page.idx == page_idx - 1 {
-            let last_ins_addr = align_up(
-                base + last_page.idx * page_size() + last_page.off,
-                alignment,
-            );
-            let curr_ins_addr = base + page_idx * page_size();
+            let last_ins_addr =
+                align_up(base + last_page.idx * PAGE_SIZE + last_page.off, alignment);
+            let curr_ins_addr = base + page_idx * PAGE_SIZE;
             let shift = curr_ins_addr - last_ins_addr;
             if shift == 0 {
                 return None;

@@ -7,16 +7,20 @@
 
 extern crate alloc as std_alloc;
 
+use core::mem;
+
 use bitfield::bitfield;
+use mmu::{paging::TableDescriptor, PAGE_SIZE};
 use std_alloc::vec::Vec;
 use tock_registers::interfaces::{Readable, Writeable};
 
 use crate::{
+    driver::mmio::MMIO_BASE,
     kalloc::bitmap_alloc::BitmapAllocator,
     mmu::{
         layout::*,
-        page_size,
-        paging::{AccessPermission, PageDescriptor, PageTables, Shareability, TableDescriptor},
+        paging::{AccessPermission, BlockDescriptor, MemAttrIdx, PageDescriptor, Shareability},
+        TOTAL_MEMORY,
     },
 };
 
@@ -30,6 +34,10 @@ mod print;
 mod sync;
 
 unsafe fn kernel_init() -> ! {
+    let lower_table = PageTables::new();
+    setup_identity_map(lower_table);
+    load_pagetables(lower_table as *mut PageTables as _, 0);
+
     for driver in driver::drivers() {
         driver.init();
     }
@@ -38,19 +46,6 @@ unsafe fn kernel_init() -> ! {
 
 fn kernel_main() -> ! {
     kprintln!("Hello, from LittleOS!");
-
-    let mut lower_table = PageTables::new(
-        ttbr0_l1_pt_start(),
-        ttbr0_l2_pt_start(),
-        ttbr0_l3_pt_start(),
-    );
-    setup_identity_map(&mut lower_table);
-    let upper_table = PageTables::new(
-        ttbr1_l1_pt_start(),
-        ttbr1_l2_pt_start(),
-        ttbr1_l3_pt_start(),
-    );
-    load_pagetables(&lower_table, &upper_table);
 
     let sp: usize;
     unsafe { core::arch::asm!("mov {x}, sp", x = out(reg) sp) };
@@ -64,7 +59,7 @@ fn kernel_main() -> ! {
         kprintln!("Failed to retrieve current execution level");
     }
 
-    let alloc = BitmapAllocator::new(ttbr1_pt_end(), boot_alloc_start());
+    let alloc = BitmapAllocator::new(boot_alloc_bitmap_start(), boot_alloc_start());
 
     kprintln!("Using a Vec ...");
     let mut nums = Vec::new_in(&alloc);
@@ -86,27 +81,75 @@ fn kernel_main() -> ! {
     cpu::wait_forever();
 }
 
-fn setup_identity_map(page_tables: &mut PageTables) {
-    // Setup the first 128 MiB as identity mapped.
-    page_tables.l1_table_mut()[0] = TableDescriptor::new(page_tables.l2_table().as_ptr() as usize);
-    const L2_ENTRY_COUNT: usize = 64;
-    const L2_SPAN: usize = 2 * (1 << 20);
-    for i in 0..L2_ENTRY_COUNT {
-        page_tables.l2_table_mut()[i] =
-            TableDescriptor::new(page_tables.l3_table(i).as_ptr() as usize);
-        let l3_table = page_tables.l3_table_mut(i);
-        for (j, l3_entry) in l3_table.iter_mut().enumerate() {
-            let addr = i * L2_SPAN + j * page_size();
-            let mut desc = PageDescriptor::new(addr);
-            desc.set_af(true);
-            desc.set_ap(AccessPermission::ReadWrite);
-            desc.set_sh(Shareability::Inner);
-            *l3_entry = desc;
-        }
+const ENTRIES_PER_PAGE: usize = PAGE_SIZE / mem::size_of::<u64>();
+
+#[repr(C)]
+struct PageTables {
+    l1_table: [u64; ENTRIES_PER_PAGE],
+    l2_table: [u64; ENTRIES_PER_PAGE],
+    l3_table: [u64; ENTRIES_PER_PAGE],
+}
+
+impl PageTables {
+    fn new() -> &'static mut PageTables {
+        let table = unsafe { &mut *(ttbr0_el1_start() as *mut PageTables) };
+        table.l1_table.fill(0);
+        table.l2_table.fill(0);
+        table.l3_table.fill(0);
+        table
     }
 }
 
-pub fn load_pagetables(lower_table: &PageTables, upper_table: &PageTables) {
+fn setup_identity_map(page_tables: &mut PageTables) {
+    page_tables.l1_table[0] = TableDescriptor::new(page_tables.l2_table.as_ptr() as _).into();
+    page_tables.l2_table[0] = TableDescriptor::new(page_tables.l3_table.as_ptr() as _).into();
+    // Map L3 table for the first 2 MiB of space.
+    for i in 0..ENTRIES_PER_PAGE {
+        let addr = i * PAGE_SIZE;
+        let mut desc = PageDescriptor::new(addr);
+        desc.set_af(true);
+        desc.set_sh(Shareability::Inner);
+        desc.set_attr_idx(MemAttrIdx::Normal);
+        if addr < rpi_phys_binary_load_addr() {
+            desc.set_ap(AccessPermission::PrivilegedReadWrite);
+            desc.set_xn(true);
+            desc.set_pxn(true);
+        } else if addr < code_end() {
+            desc.set_ap(AccessPermission::PrivilegedReadOnly);
+        } else {
+            desc.set_ap(AccessPermission::PrivilegedReadWrite);
+            desc.set_xn(true);
+            desc.set_pxn(true);
+        }
+        page_tables.l3_table[i] = desc.into();
+    }
+
+    // Map rest of memory via 2 MiB blocks
+    const BLOCK_SIZE: usize = 2 << 20;
+    const MEM_LIM: usize = TOTAL_MEMORY / BLOCK_SIZE;
+    const MMIO_START: usize = MMIO_BASE / BLOCK_SIZE;
+    for i in 1..ENTRIES_PER_PAGE {
+        let addr = i * BLOCK_SIZE;
+        let mut desc = BlockDescriptor::level2(addr);
+        desc.set_af(true);
+        desc.set_xn(true);
+        desc.set_pxn(true);
+        if i < MEM_LIM {
+            desc.set_sh(Shareability::Inner);
+            desc.set_attr_idx(MemAttrIdx::Normal);
+            desc.set_ap(AccessPermission::PrivilegedReadWrite);
+        } else if i >= MMIO_START {
+            desc.set_sh(Shareability::Outer);
+            desc.set_attr_idx(MemAttrIdx::Device);
+            desc.set_ap(AccessPermission::PrivilegedReadWrite);
+        } else {
+            desc = BlockDescriptor::invalid();
+        }
+        page_tables.l2_table[i] = desc.into();
+    }
+}
+
+pub fn load_pagetables(lower_table: u64, upper_table: u64) {
     use cortex_a::{asm::barrier::*, registers::*};
 
     // Setup MAIR
@@ -140,18 +183,17 @@ pub fn load_pagetables(lower_table: &PageTables, upper_table: &PageTables) {
     unsafe { isb(SY) };
 
     // Set TTBRx_EL1
-    const TTBR_CNP: u64 = 1;
-    TTBR0_EL1.set(lower_table.l1_table().as_ptr() as u64 + TTBR_CNP);
-    TTBR1_EL1.set(upper_table.l1_table().as_ptr() as u64 + TTBR_CNP);
+    TTBR0_EL1.set(lower_table);
+    TTBR1_EL1.set(upper_table);
 
     unsafe { dsb(ISH) };
     unsafe { isb(SY) };
 
     let mut sctlr_el1 = SctlrEl1(SCTLR_EL1.get());
 
-    sctlr_el1.set_eis(true);
     sctlr_el1.set_span(true);
-    sctlr_el1.set_enrctx(true);
+    sctlr_el1.set_eis(true);
+    sctlr_el1.set_eos(true);
 
     sctlr_el1.set_ee(false);
     sctlr_el1.set_e0e(false);
@@ -164,8 +206,8 @@ pub fn load_pagetables(lower_table: &PageTables, upper_table: &PageTables) {
     sctlr_el1.set_a(false);
 
     sctlr_el1.set_m(true);
-
     SCTLR_EL1.set(sctlr_el1.0);
+
     unsafe { isb(SY) };
 }
 
@@ -178,7 +220,7 @@ bitfield! {
     _, set_eis: 22;
     _, set_wxn: 19;
     _, set_i: 12;
-    _, set_enrctx: 10;
+    _, set_eos: 11;
     _, set_sa0: 4;
     _, set_sa: 3;
     _, set_c: 2;
