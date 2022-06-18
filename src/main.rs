@@ -9,7 +9,7 @@ extern crate alloc as std_alloc;
 
 use core::mem;
 
-use bitfield::bitfield;
+use bitflags::bitflags;
 use mmu::{paging::TableDescriptor, PAGE_SIZE};
 use std_alloc::vec::Vec;
 use tock_registers::interfaces::{Readable, Writeable};
@@ -101,8 +101,14 @@ impl PageTables {
 }
 
 fn setup_identity_map(page_tables: &mut PageTables) {
-    page_tables.l1_table[0] = TableDescriptor::new(page_tables.l2_table.as_ptr() as _).into();
-    page_tables.l2_table[0] = TableDescriptor::new(page_tables.l3_table.as_ptr() as _).into();
+    let mut desc = TableDescriptor::new(page_tables.l2_table.as_ptr() as _);
+    desc.set_af(true);
+    page_tables.l1_table[0] = desc.into();
+
+    let mut desc = TableDescriptor::new(page_tables.l3_table.as_ptr() as _);
+    desc.set_af(true);
+    page_tables.l2_table[0] = desc.into();
+
     // Map L3 table for the first 2 MiB of space.
     for i in 0..ENTRIES_PER_PAGE {
         let addr = i * PAGE_SIZE;
@@ -189,41 +195,57 @@ pub fn load_pagetables(lower_table: u64, upper_table: u64) {
     unsafe { dsb(ISH) };
     unsafe { isb(SY) };
 
-    let mut sctlr_el1 = SctlrEl1(SCTLR_EL1.get());
+    let mut sctlr_el1 = SctlrEl1::get_reg();
+    // Set compulsory bits
+    sctlr_el1 |= SctlrEl1::SPAN | SctlrEl1::EIS | SctlrEl1::EOS;
+    sctlr_el1 -= SctlrEl1::EE
+        | SctlrEl1::E0E
+        | SctlrEl1::WXN
+        | SctlrEl1::I
+        | SctlrEl1::SA0
+        | SctlrEl1::SA
+        | SctlrEl1::C
+        | SctlrEl1::A;
+    // Enable paging
+    sctlr_el1 |= SctlrEl1::M;
 
-    sctlr_el1.set_span(true);
-    sctlr_el1.set_eis(true);
-    sctlr_el1.set_eos(true);
-
-    sctlr_el1.set_ee(false);
-    sctlr_el1.set_e0e(false);
-    sctlr_el1.set_wxn(false);
-    sctlr_el1.set_i(false);
-    sctlr_el1.set_sa0(false);
-    sctlr_el1.set_sa(false);
-    sctlr_el1.set_sa(false);
-    sctlr_el1.set_c(false);
-    sctlr_el1.set_a(false);
-
-    sctlr_el1.set_m(true);
-    SCTLR_EL1.set(sctlr_el1.0);
+    sctlr_el1.set_reg();
 
     unsafe { isb(SY) };
 }
 
-bitfield! {
-    pub struct SctlrEl1(u64);
+bitflags! {
+    #[repr(transparent)]
+    struct SctlrEl1: u64 {
+        const EE = 1 << 25;
+        const E0E = 1 << 24;
+        const SPAN = 1 << 23;
+        const EIS = 1 << 22;
+        const WXN = 1 << 19;
+        const I = 1 << 12;
+        const EOS = 1 << 11;
+        const SA0 = 1 << 4;
+        const SA = 1 << 3;
+        const C = 1 << 2;
+        const A = 1 << 1;
+        const M = 1 << 0;
+    }
+}
 
-    _, set_ee: 25;
-    _, set_e0e: 24;
-    _, set_span: 23;
-    _, set_eis: 22;
-    _, set_wxn: 19;
-    _, set_i: 12;
-    _, set_eos: 11;
-    _, set_sa0: 4;
-    _, set_sa: 3;
-    _, set_c: 2;
-    _, set_a: 1;
-    _, set_m: 0;
+impl From<SctlrEl1> for u64 {
+    fn from(reg: SctlrEl1) -> Self {
+        unsafe { mem::transmute(reg) }
+    }
+}
+
+impl SctlrEl1 {
+    fn get_reg() -> SctlrEl1 {
+        let r: u64;
+        unsafe { core::arch::asm!("mrs {x}, SCTLR_EL1", x = out(reg) r) };
+        unsafe { SctlrEl1::from_bits_unchecked(r) }
+    }
+
+    fn set_reg(&self) {
+        unsafe { core::arch::asm!("msr SCTLR_EL1, {x}", x = in(reg) Into::<u64>::into(*self)) };
+    }
 }

@@ -20,6 +20,7 @@ bitfield! {
     pub u8, from into AccessPermission, _, set_ap: 62, 61;
     pub _, set_xn: 60;
     pub _, set_pxn: 59;
+    pub _, set_af: 10; // This is fake but needed - table descriptors don't have AF flag!
 }
 
 impl TableDescriptor {
