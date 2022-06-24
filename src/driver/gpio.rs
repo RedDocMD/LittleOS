@@ -2,12 +2,12 @@ use crate::{cpu, sync::NullLock};
 
 use super::mmio::{MMIODerefWrapper, MMIO_BASE};
 use tock_registers::{
-    interfaces::Writeable,
+    interfaces::{ReadWriteable, Writeable},
     register_bitfields, register_structs,
     registers::{ReadWrite, WriteOnly},
 };
 
-const GPIO_OFFSET: usize = 0x20_0000;
+const GPIO_OFFSET: usize = 0x0020_0000;
 pub const GPIO_BASE: usize = MMIO_BASE + GPIO_OFFSET;
 
 register_bitfields! {
@@ -74,7 +74,7 @@ impl GpioInner {
     fn map_uart1_pins(&mut self) {
         self.registers
             .GPFSEL1
-            .write(GPFSEL1::FSEL14::Alt5 + GPFSEL1::FSEL15::Alt5);
+            .modify(GPFSEL1::FSEL14::Alt5 + GPFSEL1::FSEL15::Alt5);
         self.disable_pull_up_down();
     }
 }
