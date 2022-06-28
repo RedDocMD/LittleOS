@@ -95,7 +95,6 @@ impl MiniUartInner {
             .write(AUX_MU_LCR::DataSize::Mode8Bit);
         self.registers.AUX_MU_MCR.write(AUX_MU_MCR::RTS::CLEAR);
         self.registers.AUX_MU_IER.set(0);
-        self.registers.AUX_MU_IIR.set(0xc6);
         self.registers.AUX_MU_BAUD.set(270);
 
         GPIO.map_uart1_pins();

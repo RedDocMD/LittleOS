@@ -7,7 +7,7 @@ pub mod qemu;
 pub mod uart;
 
 pub fn console() -> &'static impl crate::print::Write {
-    &MINI_UART
+    &PL011_UART
 }
 
 #[allow(dead_code)]
