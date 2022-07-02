@@ -27,6 +27,7 @@ use crate::{
 mod boot;
 mod cpu;
 mod driver;
+mod error;
 mod kalloc;
 mod mmu;
 mod panic;

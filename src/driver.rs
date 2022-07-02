@@ -1,6 +1,7 @@
 use self::{mini_uart::MINI_UART, qemu::QEMU_OUTPUT, uart::PL011_UART};
 
 pub mod gpio;
+pub mod mailbox;
 pub mod mini_uart;
 pub mod mmio;
 pub mod qemu;
