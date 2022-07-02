@@ -4,26 +4,33 @@ use core::{
     ptr::{self, NonNull},
 };
 
+use std_alloc::vec::Vec;
+
 use crate::{error::OsError, mmu::align_up};
 
-pub struct Mailbox<A> {
-    allocator: A,
+pub struct Mailbox<'a, A: Allocator> {
+    allocator: &'a A,
     buffer: NonNull<u8>,
     cap: usize,
     len: usize,
+    tag_idx: Vec<usize, &'a A>,
+    has_result: bool,
 }
 
 const DEFAULT_MAILBOX_SIZE: usize = 144;
 
-impl<A: Allocator> Mailbox<A> {
-    pub fn new(allocator: A) -> Result<Self, OsError> {
+impl<'a, A: Allocator> Mailbox<'a, A> {
+    pub fn new(allocator: &'a A) -> Result<Self, OsError> {
         let layout = Layout::array::<u8>(DEFAULT_MAILBOX_SIZE)?.align_to(16)?;
         let buffer = allocator.allocate(layout)?;
+        let tag_idx = Vec::new_in(allocator);
         let mut mailbox = Self {
             allocator,
             buffer: buffer.cast(),
             cap: DEFAULT_MAILBOX_SIZE,
             len: 2,
+            tag_idx,
+            has_result: false,
         };
         mailbox.write_value(0u32, 0);
         mailbox.write_value(0u32, 4);
@@ -77,6 +84,7 @@ impl<A: Allocator> Mailbox<A> {
     }
 
     pub fn append_tag<T: PropertyTag>(&mut self, tag: T) -> Result<(), OsError> {
+        self.has_result = false;
         self.append_value(tag.identifier())?;
         let buf = tag.send_buffer();
         let buf_len = buf.len();
@@ -91,12 +99,54 @@ impl<A: Allocator> Mailbox<A> {
         }
         Ok(())
     }
+
+    pub fn read_tag_result<T: PropertyTag>(&self, tag_idx: usize) -> Option<T::RecvType> {
+        if !self.has_result {
+            return None;
+        }
+        let tag_buf_idx = *self.tag_idx.get(tag_idx)?;
+        let resp_code: u32 = self.read_value(tag_buf_idx + 8);
+        if (resp_code >> 31) != 1 {
+            return None;
+        }
+        let recv_type_size = mem::size_of::<T::RecvType>();
+        assert!(self.read_value::<u32>(tag_buf_idx + 4) == recv_type_size as u32);
+        Some(self.read_value(tag_buf_idx + 12))
+    }
 }
 
-pub trait PropertyTag {
+/// # Safety
+///
+/// This is a wildly unsafe trait to use - no compiler guarantees!
+/// RecvType must be the proper receiver type for this PropertyTag.
+/// Also ensure it is repr(C).
+pub unsafe trait PropertyTag {
     type RecvType;
 
     fn identifier(&self) -> u32;
 
-    fn send_buffer(&self) -> &[u8];
+    fn send_buffer(&self) -> &[u8] {
+        unsafe { &*ptr::slice_from_raw_parts(self as *const Self as _, mem::size_of_val(self)) }
+    }
+}
+
+pub mod tags {
+    use super::PropertyTag;
+
+    pub struct GetVcMem;
+
+    #[repr(C)]
+    #[derive(Debug)]
+    pub struct VcMem {
+        base: u32,
+        size: u32,
+    }
+
+    unsafe impl PropertyTag for GetVcMem {
+        type RecvType = VcMem;
+
+        fn identifier(&self) -> u32 {
+            0x0001_0006
+        }
+    }
 }
