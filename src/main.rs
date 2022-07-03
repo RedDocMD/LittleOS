@@ -15,7 +15,10 @@ use std_alloc::vec::Vec;
 use tock_registers::interfaces::{Readable, Writeable};
 
 use crate::{
-    driver::mmio::MMIO_BASE,
+    driver::{
+        mailbox::{tags::GetVcMem, Mailbox},
+        mmio::MMIO_BASE,
+    },
     kalloc::bitmap_alloc::BitmapAllocator,
     mmu::{
         layout::*,
@@ -78,6 +81,11 @@ fn kernel_main() -> ! {
     kprintln!("Bootmem start = {:#018X}", boot_alloc_start());
     kprintln!("nums start =    {:#018X}", nums.as_ptr() as usize);
     kprintln!("floats start =  {:#018X}", floats.as_ptr() as usize);
+
+    // TODO: Get rid of unwrap
+    let mut mbox = Mailbox::new(&alloc).unwrap();
+    let vc_mem_tag = GetVcMem;
+    mbox.append_tag(vc_mem_tag).unwrap();
 
     cpu::wait_forever();
 }

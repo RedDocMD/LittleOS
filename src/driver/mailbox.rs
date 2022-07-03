@@ -93,7 +93,13 @@ impl<'a, A: Allocator> Mailbox<'a, A> {
         for i in buf {
             self.append_value(i)?;
         }
-        let pad_len = align_up(buf_len, 4) - buf_len;
+        let recv_buf_len = mem::size_of::<T::RecvType>();
+        if recv_buf_len > buf_len {
+            for _ in 0..(recv_buf_len - buf_len) {
+                self.append_value(0)?;
+            }
+        }
+        let pad_len = align_up(buf_len.max(recv_buf_len), 4) - buf_len;
         for _ in 0..pad_len {
             self.append_value(0u8)?;
         }
