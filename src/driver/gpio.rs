@@ -41,10 +41,12 @@ register_bitfields! {
 register_structs! {
     #[allow(non_snake_case)]
     RegisterBlock {
+        (0x00 => _reserved1),
         (0x04 => GPFSEL1: ReadWrite<u32, GPFSEL1::Register>),
+        (0x08 => _reserved2),
         (0x94 => GPPUD: WriteOnly<u32, GPPUD::Register>),
         (0x98 => GPPUDCLK0: WriteOnly<u32, GPPUDCLK0::Register>),
-        (0xFF => @END),
+        (0x9C => @END),
     }
 }
 

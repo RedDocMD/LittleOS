@@ -58,16 +58,20 @@ register_bitfields! {
 register_structs! {
     #[allow(non_snake_case)]
     RegisterBlock {
+        (0x00 => _reserved1),
         (0x04 => AUX_ENABLE: ReadWrite<u32, AUX_ENABLE::Register>),
+        (0x08 => _reserved2),
         (0x40 => AUX_MU_IO: ReadWrite<u32>),
         (0x44 => AUX_MU_IER: WriteOnly<u32>),
         (0x48 => AUX_MU_IIR: WriteOnly<u32>),
         (0x4C => AUX_MU_LCR: WriteOnly<u32, AUX_MU_LCR::Register>),
         (0x50 => AUX_MU_MCR: WriteOnly<u32, AUX_MU_MCR::Register>),
         (0x54 => AUX_MU_LSR: ReadOnly<u32, AUX_MU_LSR::Register>),
+        (0x58 => _reserved3),
         (0x60 => AUX_MU_CNTL: WriteOnly<u32, AUX_MU_CNTL::Register>),
+        (0x64 => _reserved4),
         (0x68 => AUX_MU_BAUD: WriteOnly<u32>),
-        (0xFF => @END),
+        (0x6C => @END),
     }
 }
 
@@ -105,10 +109,10 @@ impl MiniUartInner {
     }
 
     fn putc(&mut self, c: u8) {
-        while self
+        while !self
             .registers
             .AUX_MU_LSR
-            .matches_all(AUX_MU_LSR::TransmitterEmpty::CLEAR)
+            .matches_all(AUX_MU_LSR::TransmitterEmpty::SET)
         {
             asm::nop();
         }
