@@ -131,18 +131,19 @@ impl<'a, A: Allocator> Mailbox<'a, A> {
         self.append_value(tag.identifier())?;
         let buf = tag.send_buffer();
         let buf_len = buf.len();
-        self.append_value(buf_len as u32)?;
+        let recv_buf_len = mem::size_of::<T::RecvType>();
+        let full_len = buf_len.max(recv_buf_len);
+        self.append_value(full_len as u32)?;
         self.append_value(0u32)?;
         for i in buf {
-            self.append_value(i)?;
+            self.append_value(*i)?;
         }
-        let recv_buf_len = mem::size_of::<T::RecvType>();
         if recv_buf_len > buf_len {
             for _ in 0..(recv_buf_len - buf_len) {
-                self.append_value(0)?;
+                self.append_value(0u8)?;
             }
         }
-        let pad_len = align_up(buf_len.max(recv_buf_len), 4) - buf_len;
+        let pad_len = align_up(full_len, 4) - full_len;
         for _ in 0..pad_len {
             self.append_value(0u8)?;
         }
@@ -240,16 +241,30 @@ pub mod tags {
 
     #[repr(C)]
     #[derive(Debug)]
-    pub struct VcMem {
+    pub struct Mem {
         pub base: u32,
         pub size: u32,
     }
 
     unsafe impl PropertyTag for GetVcMem {
-        type RecvType = VcMem;
+        type RecvType = Mem;
 
         fn identifier(&self) -> u32 {
             0x0001_0006
+        }
+    }
+
+    #[repr(C)]
+    #[derive(Debug)]
+    pub struct SimpleValue<T>(pub T);
+
+    pub struct GetPitch;
+
+    unsafe impl PropertyTag for GetPitch {
+        type RecvType = SimpleValue<u32>;
+
+        fn identifier(&self) -> u32 {
+            0x0004_0008
         }
     }
 }

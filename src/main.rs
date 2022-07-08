@@ -10,21 +10,26 @@ extern crate alloc as std_alloc;
 use core::{alloc::Allocator, mem};
 
 use bitflags::bitflags;
-use error::OsError;
-use mmu::{paging::TableDescriptor, PAGE_SIZE};
 use std_alloc::vec::Vec;
 use tock_registers::interfaces::{Readable, Writeable};
 
 use crate::{
     driver::{
-        mailbox::{tags::GetVcMem, Mailbox},
+        mailbox::{
+            tags::{GetPitch, GetVcMem},
+            Mailbox,
+        },
         mmio::MMIO_BASE,
     },
+    error::OsError,
     kalloc::bitmap_alloc::BitmapAllocator,
     mmu::{
         layout::*,
-        paging::{AccessPermission, BlockDescriptor, MemAttrIdx, PageDescriptor, Shareability},
-        TOTAL_MEMORY,
+        paging::{
+            AccessPermission, BlockDescriptor, MemAttrIdx, PageDescriptor, Shareability,
+            TableDescriptor,
+        },
+        PAGE_SIZE, TOTAL_MEMORY,
     },
 };
 
@@ -66,22 +71,24 @@ fn kernel_main() -> ! {
 
     let alloc = BitmapAllocator::new(boot_alloc_bitmap_start(), boot_alloc_start());
 
-    kprintln!("Using a Vec ...");
-    let mut nums = Vec::new_in(&alloc);
-    const NUMS_COUNT: usize = 10;
-    nums.reserve(NUMS_COUNT);
-    for i in 0..NUMS_COUNT {
-        nums.push((i + 1) * 2);
+    {
+        kprintln!("Using a Vec ...");
+        let mut nums = Vec::new_in(&alloc);
+        const NUMS_COUNT: usize = 10;
+        nums.reserve(NUMS_COUNT);
+        for i in 0..NUMS_COUNT {
+            nums.push((i + 1) * 2);
+        }
+        kprintln!("nums = {:?}", nums);
+
+        let mut floats: Vec<f32, _> = Vec::new_in(&alloc);
+        const FLOATS_COUNT: usize = 15;
+        floats.reserve(FLOATS_COUNT);
+
+        kprintln!("Bootmem start = {:#018X}", boot_alloc_start());
+        kprintln!("nums start =    {:#018X}", nums.as_ptr() as usize);
+        kprintln!("floats start =  {:#018X}", floats.as_ptr() as usize);
     }
-    kprintln!("nums = {:?}", nums);
-
-    let mut floats: Vec<f32, _> = Vec::new_in(&alloc);
-    const FLOATS_COUNT: usize = 15;
-    floats.reserve(FLOATS_COUNT);
-
-    kprintln!("Bootmem start = {:#018X}", boot_alloc_start());
-    kprintln!("nums start =    {:#018X}", nums.as_ptr() as usize);
-    kprintln!("floats start =  {:#018X}", floats.as_ptr() as usize);
 
     if let Err(err) = test_mailbox(&alloc) {
         kprintln!("Calling Mailbox failed: {}", err);
@@ -92,17 +99,19 @@ fn kernel_main() -> ! {
 
 fn test_mailbox<A: Allocator>(alloc: &A) -> Result<(), OsError> {
     let mut mbox = Mailbox::new(alloc)?;
-    let vc_mem_tag = GetVcMem;
-    mbox.append_tag(vc_mem_tag)?;
+    mbox.append_tag(GetPitch)?;
+    mbox.append_tag(GetVcMem)?;
     if let Ok(stat) = mbox.call() {
         if stat {
             kprintln!("Mailbox call succeeded!");
-            let result = mbox.read_tag_result::<GetVcMem>(0).unwrap();
+            let pitch = mbox.read_tag_result::<GetPitch>(0).unwrap();
+            let vc_result = mbox.read_tag_result::<GetVcMem>(1).unwrap();
             kprintln!(
                 "VideoCore memory starts at {:#018X} at has size {:#010X}",
-                result.base,
-                result.size
+                vc_result.base,
+                vc_result.size
             );
+            kprintln!("Pitch: {}", pitch.0);
         }
     }
 
