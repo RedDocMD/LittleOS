@@ -126,7 +126,7 @@ unsafe impl Allocator for BitmapAllocator {
             // Leave that as allocated.
             let next_page_addr = align_up(start_addr, PAGE_SIZE);
             let shift = next_page_addr - start_addr;
-            let new_actual_size = actual_size - shift;
+            let new_actual_size = actual_size.saturating_sub(shift);
             let new_page_cnt = new_actual_size / PAGE_SIZE;
             let mut bitmap = self.page_map.borrow_mut();
             if new_page_cnt > 0 {
