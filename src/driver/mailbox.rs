@@ -4,9 +4,41 @@ use core::{
     ptr::{self, NonNull},
 };
 
+use cortex_a::asm;
 use std_alloc::vec::Vec;
+use tock_registers::{
+    interfaces::{Readable, Writeable},
+    register_bitfields, register_structs,
+    registers::{ReadOnly, WriteOnly},
+};
 
-use crate::{error::OsError, mmu::align_up};
+use crate::{driver::mmio::MMIO_BASE, error::OsError, mmu::align_up};
+
+use super::mmio::MMIODerefWrapper;
+
+const VIDEOCORE_MBOX_OFFSET: usize = 0x0000_B880;
+const VIDEOCORE_MBOX_BASE: usize = MMIO_BASE + VIDEOCORE_MBOX_OFFSET;
+
+register_bitfields! {
+    u32,
+
+    Mbox0_Status [
+        FULL 31,
+        EMPTY 30,
+    ],
+}
+
+register_structs! {
+    #[allow(non_snake_case)]
+    RegisterBlock {
+        (0x00 => Mbox0_Read: ReadOnly<u32>),
+        (0x04 => _reserved1),
+        (0x18 => Mbox0_Status: ReadOnly<u32, Mbox0_Status::Register>),
+        (0x1C => _reserved2),
+        (0x20 => Mbox1_Write: WriteOnly<u32>),
+        (0x24 => @END),
+    }
+}
 
 pub struct Mailbox<'a, A: Allocator> {
     allocator: &'a A,
@@ -15,6 +47,7 @@ pub struct Mailbox<'a, A: Allocator> {
     len: usize,
     tag_idx: Vec<usize, &'a A>,
     has_result: bool,
+    registers: MMIODerefWrapper<RegisterBlock>,
 }
 
 const DEFAULT_MAILBOX_SIZE: usize = 144;
@@ -24,16 +57,18 @@ impl<'a, A: Allocator> Mailbox<'a, A> {
         let layout = Layout::array::<u8>(DEFAULT_MAILBOX_SIZE)?.align_to(16)?;
         let buffer = allocator.allocate(layout)?;
         let tag_idx = Vec::new_in(allocator);
+        let registers = unsafe { MMIODerefWrapper::new(VIDEOCORE_MBOX_BASE) };
         let mut mailbox = Self {
             allocator,
             buffer: buffer.cast(),
             cap: DEFAULT_MAILBOX_SIZE,
-            len: 2,
+            len: 8,
             tag_idx,
+            registers,
             has_result: false,
         };
-        mailbox.write_value(0u32, 0);
-        mailbox.write_value(0u32, 4);
+        mailbox.write_value(0, 0u32);
+        mailbox.write_value(4, 0u32);
         Ok(mailbox)
     }
 
@@ -63,7 +98,7 @@ impl<'a, A: Allocator> Mailbox<'a, A> {
         Ok(())
     }
 
-    fn write_value<T>(&mut self, value: T, idx: usize) {
+    fn write_value<T>(&mut self, idx: usize, value: T) {
         let val_size = mem::size_of::<T>();
         assert!(idx + val_size <= self.cap);
         unsafe {
@@ -83,8 +118,16 @@ impl<'a, A: Allocator> Mailbox<'a, A> {
         }
     }
 
+    fn pop_value<T>(&mut self) {
+        let val_size = mem::size_of::<T>();
+        assert!(val_size <= self.len);
+        self.len -= val_size;
+    }
+
     pub fn append_tag<T: PropertyTag>(&mut self, tag: T) -> Result<(), OsError> {
         self.has_result = false;
+        self.tag_idx.push(self.len);
+
         self.append_value(tag.identifier())?;
         let buf = tag.send_buffer();
         let buf_len = buf.len();
@@ -103,6 +146,7 @@ impl<'a, A: Allocator> Mailbox<'a, A> {
         for _ in 0..pad_len {
             self.append_value(0u8)?;
         }
+
         Ok(())
     }
 
@@ -116,8 +160,54 @@ impl<'a, A: Allocator> Mailbox<'a, A> {
             return None;
         }
         let recv_type_size = mem::size_of::<T::RecvType>();
-        assert!(self.read_value::<u32>(tag_buf_idx + 4) == recv_type_size as u32);
+        assert!((resp_code & 0x7FFF_FFFF) == recv_type_size as u32);
         Some(self.read_value(tag_buf_idx + 12))
+    }
+
+    pub fn call(&mut self) -> Result<bool, OsError> {
+        // Push end tag
+        self.append_value(0u32)?;
+        // Set length
+        self.write_value(0, self.len as u32);
+        let value = (self.addr() | 0x8) as u32;
+
+        const MBOX_RESPONSE: u32 = 0x8000_0000;
+
+        // Wait until we can write mailbox
+        while self
+            .registers
+            .Mbox0_Status
+            .matches_all(Mbox0_Status::FULL::SET)
+        {
+            asm::nop();
+        }
+
+        // Write mailbox
+        self.registers.Mbox1_Write.set(value);
+
+        // Now wait for response
+        loop {
+            while self
+                .registers
+                .Mbox0_Status
+                .matches_all(Mbox0_Status::EMPTY::SET)
+            {
+                asm::nop();
+            }
+            if self.registers.Mbox0_Read.get() == value {
+                let resp: u32 = self.read_value(4);
+                self.has_result = resp == MBOX_RESPONSE;
+                break;
+            }
+        }
+
+        // Pop end tag
+        self.pop_value::<u32>();
+        Ok(self.has_result)
+    }
+
+    fn addr(&self) -> usize {
+        (self.buffer.as_ptr() as usize) & !0xF
     }
 }
 
@@ -144,8 +234,8 @@ pub mod tags {
     #[repr(C)]
     #[derive(Debug)]
     pub struct VcMem {
-        base: u32,
-        size: u32,
+        pub base: u32,
+        pub size: u32,
     }
 
     unsafe impl PropertyTag for GetVcMem {

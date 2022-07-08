@@ -7,9 +7,10 @@
 
 extern crate alloc as std_alloc;
 
-use core::mem;
+use core::{alloc::Allocator, mem};
 
 use bitflags::bitflags;
+use error::OsError;
 use mmu::{paging::TableDescriptor, PAGE_SIZE};
 use std_alloc::vec::Vec;
 use tock_registers::interfaces::{Readable, Writeable};
@@ -82,12 +83,30 @@ fn kernel_main() -> ! {
     kprintln!("nums start =    {:#018X}", nums.as_ptr() as usize);
     kprintln!("floats start =  {:#018X}", floats.as_ptr() as usize);
 
-    // TODO: Get rid of unwrap
-    let mut mbox = Mailbox::new(&alloc).unwrap();
-    let vc_mem_tag = GetVcMem;
-    mbox.append_tag(vc_mem_tag).unwrap();
+    if let Err(err) = test_mailbox(&alloc) {
+        kprintln!("Calling Mailbox failed: {}", err);
+    }
 
     cpu::wait_forever();
+}
+
+fn test_mailbox<A: Allocator>(alloc: &A) -> Result<(), OsError> {
+    let mut mbox = Mailbox::new(alloc)?;
+    let vc_mem_tag = GetVcMem;
+    mbox.append_tag(vc_mem_tag)?;
+    if let Ok(stat) = mbox.call() {
+        if stat {
+            kprintln!("Mailbox call succeeded!");
+            let result = mbox.read_tag_result::<GetVcMem>(0).unwrap();
+            kprintln!(
+                "VideoCore memory starts at {:#018X} at has size {:#010X}",
+                result.base,
+                result.size
+            );
+        }
+    }
+
+    Ok(())
 }
 
 const ENTRIES_PER_PAGE: usize = PAGE_SIZE / mem::size_of::<u64>();
