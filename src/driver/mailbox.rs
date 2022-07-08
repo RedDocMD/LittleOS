@@ -50,7 +50,7 @@ pub struct Mailbox<'a, A: Allocator> {
     registers: MMIODerefWrapper<RegisterBlock>,
 }
 
-const DEFAULT_MAILBOX_SIZE: usize = 144;
+const DEFAULT_MAILBOX_SIZE: usize = 36 * mem::size_of::<u32>();
 
 impl<'a, A: Allocator> Mailbox<'a, A> {
     pub fn new(allocator: &'a A) -> Result<Self, OsError> {
@@ -208,6 +208,13 @@ impl<'a, A: Allocator> Mailbox<'a, A> {
 
     fn addr(&self) -> usize {
         (self.buffer.as_ptr() as usize) & !0xF
+    }
+}
+
+impl<'a, A: Allocator> Drop for Mailbox<'a, A> {
+    fn drop(&mut self) {
+        let layout = Layout::array::<u8>(self.cap).unwrap().align_to(16).unwrap();
+        unsafe { self.allocator.deallocate(self.buffer, layout) };
     }
 }
 
