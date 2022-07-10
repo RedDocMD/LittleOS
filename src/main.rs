@@ -7,21 +7,14 @@
 
 extern crate alloc as std_alloc;
 
-use core::{alloc::Allocator, mem};
+use core::mem;
 
 use bitflags::bitflags;
 use std_alloc::vec::Vec;
 use tock_registers::interfaces::{Readable, Writeable};
 
 use crate::{
-    driver::{
-        mailbox::{
-            tags::{GetPitch, GetVcMem},
-            Mailbox,
-        },
-        mmio::MMIO_BASE,
-    },
-    error::OsError,
+    driver::{framebuffer::Framebuffer, mmio::MMIO_BASE},
     kalloc::bitmap_alloc::BitmapAllocator,
     mmu::{
         layout::*,
@@ -90,34 +83,11 @@ fn kernel_main() -> ! {
         kprintln!("floats start =  {:#018X}", floats.as_ptr() as usize);
     }
 
-    if let Err(err) = test_mailbox(&alloc) {
-        kprintln!("Calling Mailbox failed: {}", err);
-    }
+    let framebuffer = Framebuffer::new(&alloc).unwrap();
+    kprintln!("{:?}", framebuffer);
 
     cpu::wait_forever();
 }
-
-fn test_mailbox<A: Allocator>(alloc: &A) -> Result<(), OsError> {
-    let mut mbox = Mailbox::new(alloc)?;
-    mbox.append_tag(GetPitch)?;
-    mbox.append_tag(GetVcMem)?;
-    if let Ok(stat) = mbox.call() {
-        if stat {
-            kprintln!("Mailbox call succeeded!");
-            let pitch = mbox.read_tag_result::<GetPitch>(0).unwrap();
-            let vc_result = mbox.read_tag_result::<GetVcMem>(1).unwrap();
-            kprintln!(
-                "VideoCore memory starts at {:#018X} at has size {:#010X}",
-                vc_result.base,
-                vc_result.size
-            );
-            kprintln!("Pitch: {}", pitch.0);
-        }
-    }
-
-    Ok(())
-}
-
 const ENTRIES_PER_PAGE: usize = PAGE_SIZE / mem::size_of::<u64>();
 
 #[repr(C)]

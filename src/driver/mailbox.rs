@@ -233,38 +233,3 @@ pub unsafe trait PropertyTag {
         unsafe { &*ptr::slice_from_raw_parts(self as *const Self as _, mem::size_of_val(self)) }
     }
 }
-
-pub mod tags {
-    use super::PropertyTag;
-
-    pub struct GetVcMem;
-
-    #[repr(C)]
-    #[derive(Debug)]
-    pub struct Mem {
-        pub base: u32,
-        pub size: u32,
-    }
-
-    unsafe impl PropertyTag for GetVcMem {
-        type RecvType = Mem;
-
-        fn identifier(&self) -> u32 {
-            0x0001_0006
-        }
-    }
-
-    #[repr(C)]
-    #[derive(Debug)]
-    pub struct SimpleValue<T>(pub T);
-
-    pub struct GetPitch;
-
-    unsafe impl PropertyTag for GetPitch {
-        type RecvType = SimpleValue<u32>;
-
-        fn identifier(&self) -> u32 {
-            0x0004_0008
-        }
-    }
-}
