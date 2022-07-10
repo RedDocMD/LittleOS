@@ -15,7 +15,7 @@ use tock_registers::interfaces::{Readable, Writeable};
 
 use crate::{
     driver::{
-        framebuffer::{Framebuffer, Pixel, PixelOrder},
+        framebuffer::{Framebuffer, Pixel},
         mmio::MMIO_BASE,
     },
     kalloc::bitmap_alloc::BitmapAllocator,
@@ -88,11 +88,13 @@ fn kernel_main() -> ! {
 
     let mut framebuffer = Framebuffer::new(&alloc).unwrap();
     kprintln!("{:?}", framebuffer);
-    for y in 0..768 {
-        for x in 0..1024 {
-            framebuffer[(x, y)] = Pixel::new(
-                ((x % 256) as u8, (y % 256) as u8, 255, 255),
-                PixelOrder::Rgb,
+    let pixel_order = framebuffer.pixel_order();
+    for y in 0..framebuffer.height() {
+        for x in 0..framebuffer.width() {
+            framebuffer.set(
+                x,
+                y,
+                Pixel::new(((x % 256) as u8, (y % 256) as u8, 255, 255), pixel_order),
             );
         }
     }

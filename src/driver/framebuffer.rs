@@ -1,36 +1,20 @@
-use core::{
-    alloc::Allocator,
-    fmt, mem,
-    ops::{Index, IndexMut},
-    ptr,
-};
+use core::{alloc::Allocator, mem, ptr::NonNull};
 
 use crate::error::OsError;
 
 use super::mailbox::{Mailbox, PropertyTag};
 
+#[derive(Debug)]
 pub struct Framebuffer {
-    buffer: &'static mut [Pixel],
+    buf: NonNull<Pixel>,
+    buf_len: usize,
     width: usize,
     height: usize,
     pitch: usize,
     pixel_order: PixelOrder,
 }
 
-impl fmt::Debug for Framebuffer {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Framebuffer")
-            .field("buffer_addr", &(self.buffer.as_ptr()))
-            .field("buffer_size", &self.buffer.len())
-            .field("width", &self.width)
-            .field("height", &self.height)
-            .field("pitch", &self.pitch)
-            .field("pixel_order", &self.pixel_order)
-            .finish()
-    }
-}
-
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum PixelOrder {
     Bgr = 0,
     Rgb = 1,
@@ -62,24 +46,6 @@ impl Pixel {
     }
 }
 
-impl Index<(usize, usize)> for Framebuffer {
-    type Output = Pixel;
-
-    fn index(&self, index: (usize, usize)) -> &Self::Output {
-        let (x, y) = index;
-        let off = y * (self.pitch / mem::size_of::<Pixel>()) + x;
-        &self.buffer[off]
-    }
-}
-
-impl IndexMut<(usize, usize)> for Framebuffer {
-    fn index_mut(&mut self, index: (usize, usize)) -> &mut Self::Output {
-        let (x, y) = index;
-        let off = y * (self.pitch / mem::size_of::<Pixel>()) + x;
-        &mut self.buffer[off]
-    }
-}
-
 impl Framebuffer {
     pub fn new<A: Allocator>(alloc: &A) -> Result<Self, OsError> {
         let mut mailbox = Mailbox::new(alloc)?;
@@ -87,6 +53,8 @@ impl Framebuffer {
         const WIDTH: u32 = 1024;
         const HEIGHT: u32 = 768;
 
+        // FIXME: Map framebuffer to above physical RAM
+        // FIXME: Manually set the right pitch
         mailbox.append_tag(SetPhysicalSize {
             width: WIDTH,
             height: HEIGHT,
@@ -121,20 +89,39 @@ impl Framebuffer {
             PixelOrder::Bgr
         };
 
-        let buffer = unsafe {
-            &mut *ptr::slice_from_raw_parts_mut(
-                (fb_addr.base & 0x3FFF_FFFF) as *mut Pixel,
-                fb_addr.size as usize / mem::size_of::<Pixel>(),
-            )
-        };
+        let buf = NonNull::new((fb_addr.base & 0x3FFF_FFFF) as *mut Pixel).unwrap();
+        let buf_len = fb_addr.size as usize / mem::size_of::<Pixel>();
 
         Ok(Self {
-            buffer,
+            buf,
+            buf_len,
             width: virt_size.width as usize,
             height: virt_size.height as usize,
             pitch: pitch as usize,
             pixel_order,
         })
+    }
+
+    fn offset(&self, x: usize, y: usize) -> usize {
+        y * (self.pitch / mem::size_of::<Pixel>()) + x
+    }
+
+    pub fn set(&mut self, x: usize, y: usize, pixel: Pixel) {
+        let off = self.offset(x, y);
+        assert!(off < self.buf_len);
+        unsafe { self.buf.as_ptr().add(off).write_volatile(pixel) };
+    }
+
+    pub fn width(&self) -> usize {
+        self.width
+    }
+
+    pub fn height(&self) -> usize {
+        self.height
+    }
+
+    pub fn pixel_order(&self) -> PixelOrder {
+        self.pixel_order
     }
 }
 
