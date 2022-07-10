@@ -17,7 +17,7 @@ ELF := target/aarch64-unknown-none-softfloat/$(TYPE)/kernel
 
 run: $(IMG)
 	qemu-system-aarch64 -kernel $(IMG) -machine raspi3ap \
-		-display none -serial stdio
+		-serial stdio 2> /dev/null
 
 debug: $(IMG)
 	qemu-system-aarch64 -kernel $(IMG) -machine raspi3ap \

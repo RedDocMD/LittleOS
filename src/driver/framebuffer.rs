@@ -36,8 +36,8 @@ pub enum PixelOrder {
     Rgb = 1,
 }
 
-#[derive(Debug)]
 #[repr(C)]
+#[derive(Debug, Clone, Copy)]
 pub struct Pixel {
     first: u8,
     green: u8,
@@ -100,10 +100,7 @@ impl Framebuffer {
         mailbox.append_tag(SetPixelOrder {
             order: PixelOrder::Rgb as u32,
         })?; // 4
-        mailbox.append_tag(AllocateFrameBuffer {
-            alignment: 4096,
-            size: 0,
-        })?; // 5
+        mailbox.append_tag(AllocateFrameBuffer { alignment: 4096 })?; // 5
         mailbox.append_tag(GetPitch)?; // 6
 
         mailbox.call()?;
@@ -220,7 +217,6 @@ unsafe impl PropertyTag for SetPixelOrder {
 #[repr(C)]
 struct AllocateFrameBuffer {
     alignment: u32,
-    size: u32,
 }
 
 #[repr(C)]

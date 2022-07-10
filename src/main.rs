@@ -14,7 +14,10 @@ use std_alloc::vec::Vec;
 use tock_registers::interfaces::{Readable, Writeable};
 
 use crate::{
-    driver::{framebuffer::Framebuffer, mmio::MMIO_BASE},
+    driver::{
+        framebuffer::{Framebuffer, Pixel, PixelOrder},
+        mmio::MMIO_BASE,
+    },
     kalloc::bitmap_alloc::BitmapAllocator,
     mmu::{
         layout::*,
@@ -83,8 +86,16 @@ fn kernel_main() -> ! {
         kprintln!("floats start =  {:#018X}", floats.as_ptr() as usize);
     }
 
-    let framebuffer = Framebuffer::new(&alloc).unwrap();
+    let mut framebuffer = Framebuffer::new(&alloc).unwrap();
     kprintln!("{:?}", framebuffer);
+    for y in 0..768 {
+        for x in 0..1024 {
+            framebuffer[(x, y)] = Pixel::new(
+                ((x % 256) as u8, (y % 256) as u8, 255, 255),
+                PixelOrder::Rgb,
+            );
+        }
+    }
 
     cpu::wait_forever();
 }
