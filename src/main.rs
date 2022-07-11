@@ -10,12 +10,14 @@ extern crate alloc as std_alloc;
 use core::mem;
 
 use bitflags::bitflags;
+use driver::mailbox::PropertyTag;
 use std_alloc::vec::Vec;
 use tock_registers::interfaces::{Readable, Writeable};
 
 use crate::{
     driver::{
         framebuffer::{Framebuffer, Pixel},
+        mailbox::Mailbox,
         mmio::MMIO_BASE,
     },
     kalloc::bitmap_alloc::BitmapAllocator,
@@ -86,6 +88,23 @@ fn kernel_main() -> ! {
         kprintln!("floats start =  {:#018X}", floats.as_ptr() as usize);
     }
 
+    let mut mbox = Mailbox::new(&alloc).unwrap();
+    mbox.append_tag(GetVcMemory).unwrap();
+    mbox.append_tag(GetArmMemory).unwrap();
+    mbox.call().unwrap();
+    let vc_mem = mbox.read_tag_result::<GetVcMemory>(0).unwrap();
+    let arm_mem = mbox.read_tag_result::<GetArmMemory>(1).unwrap();
+    kprintln!(
+        "VC Memory : Base = {:#018X}, Size = {:#018X}",
+        vc_mem.base,
+        vc_mem.size
+    );
+    kprintln!(
+        "Arm Memory: Base = {:#018X}, Size = {:#018X}",
+        arm_mem.base,
+        arm_mem.size
+    );
+
     let mut framebuffer = Framebuffer::new(&alloc).unwrap();
     kprintln!("{:?}", framebuffer);
     let pixel_order = framebuffer.pixel_order();
@@ -94,13 +113,43 @@ fn kernel_main() -> ! {
             framebuffer.set(
                 x,
                 y,
-                Pixel::new(((x % 256) as u8, (y % 256) as u8, 255, 255), pixel_order),
+                Pixel::new(
+                    ((x % 256) as u8, (y % 256) as u8, ((x + y) % 256) as u8, 255),
+                    pixel_order,
+                ),
             );
         }
     }
 
     cpu::wait_forever();
 }
+
+#[repr(C)]
+struct Mem {
+    base: u32,
+    size: u32,
+}
+
+struct GetArmMemory;
+
+struct GetVcMemory;
+
+unsafe impl PropertyTag for GetArmMemory {
+    type RecvType = Mem;
+
+    fn identifier(&self) -> u32 {
+        0x00010005
+    }
+}
+
+unsafe impl PropertyTag for GetVcMemory {
+    type RecvType = Mem;
+
+    fn identifier(&self) -> u32 {
+        0x00010006
+    }
+}
+
 const ENTRIES_PER_PAGE: usize = PAGE_SIZE / mem::size_of::<u64>();
 
 #[repr(C)]

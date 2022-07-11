@@ -1,6 +1,6 @@
 use core::{alloc::Allocator, mem, ptr::NonNull};
 
-use crate::error::OsError;
+use crate::{error::OsError, mmu::PAGE_SIZE};
 
 use super::mailbox::{Mailbox, PropertyTag};
 
@@ -53,8 +53,6 @@ impl Framebuffer {
         const WIDTH: u32 = 1024;
         const HEIGHT: u32 = 768;
 
-        // FIXME: Map framebuffer to above physical RAM
-        // FIXME: Manually set the right pitch
         mailbox.append_tag(SetPhysicalSize {
             width: WIDTH,
             height: HEIGHT,
@@ -68,7 +66,9 @@ impl Framebuffer {
         mailbox.append_tag(SetPixelOrder {
             order: PixelOrder::Rgb as u32,
         })?; // 4
-        mailbox.append_tag(AllocateFrameBuffer { alignment: 4096 })?; // 5
+        mailbox.append_tag(AllocateFrameBuffer {
+            alignment: PAGE_SIZE as u32,
+        })?; // 5
         mailbox.append_tag(GetPitch)?; // 6
 
         mailbox.call()?;
