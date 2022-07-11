@@ -10,24 +10,22 @@ extern crate alloc as std_alloc;
 use core::mem;
 
 use bitflags::bitflags;
-use driver::mailbox::PropertyTag;
 use std_alloc::vec::Vec;
 use tock_registers::interfaces::{Readable, Writeable};
 
 use crate::{
     driver::{
         framebuffer::{Framebuffer, Pixel},
-        mailbox::Mailbox,
         mmio::MMIO_BASE,
     },
-    kalloc::bitmap_alloc::BitmapAllocator,
+    kalloc::{bitmap_alloc::BitmapAllocator, fixed_buffer_alloc::FixedSliceAlloc},
     mmu::{
         layout::*,
         paging::{
             AccessPermission, BlockDescriptor, MemAttrIdx, PageDescriptor, Shareability,
             TableDescriptor,
         },
-        PAGE_SIZE, TOTAL_MEMORY,
+        PAGE_SIZE,
     },
 };
 
@@ -42,8 +40,18 @@ mod print;
 mod sync;
 
 unsafe fn kernel_init() -> ! {
+    let mem_limits = {
+        #[repr(align(16))]
+        struct MboxArr {
+            buf: [u8; 256],
+        }
+        let mut mbox_arr = MboxArr { buf: [0; 256] };
+        let alloc = FixedSliceAlloc::new(&mut mbox_arr.buf);
+        get_memory_limits(&alloc).unwrap()
+    };
+
     let lower_table = PageTables::new();
-    setup_identity_map(lower_table);
+    lower_table.setup_identity_map(&mem_limits);
     load_pagetables(lower_table as *mut PageTables as _, 0);
 
     for driver in driver::drivers() {
@@ -88,29 +96,12 @@ fn kernel_main() -> ! {
         kprintln!("floats start =  {:#018X}", floats.as_ptr() as usize);
     }
 
-    let mut mbox = Mailbox::new(&alloc).unwrap();
-    mbox.append_tag(GetVcMemory).unwrap();
-    mbox.append_tag(GetArmMemory).unwrap();
-    mbox.call().unwrap();
-    let vc_mem = mbox.read_tag_result::<GetVcMemory>(0).unwrap();
-    let arm_mem = mbox.read_tag_result::<GetArmMemory>(1).unwrap();
-    kprintln!(
-        "VC Memory : Base = {:#018X}, Size = {:#018X}",
-        vc_mem.base,
-        vc_mem.size
-    );
-    kprintln!(
-        "Arm Memory: Base = {:#018X}, Size = {:#018X}",
-        arm_mem.base,
-        arm_mem.size
-    );
-
     let mut framebuffer = Framebuffer::new(&alloc).unwrap();
     kprintln!("{:?}", framebuffer);
     let pixel_order = framebuffer.pixel_order();
     for y in 0..framebuffer.height() {
         for x in 0..framebuffer.width() {
-            framebuffer.set(
+            framebuffer.set_pixel(
                 x,
                 y,
                 Pixel::new(
@@ -122,32 +113,6 @@ fn kernel_main() -> ! {
     }
 
     cpu::wait_forever();
-}
-
-#[repr(C)]
-struct Mem {
-    base: u32,
-    size: u32,
-}
-
-struct GetArmMemory;
-
-struct GetVcMemory;
-
-unsafe impl PropertyTag for GetArmMemory {
-    type RecvType = Mem;
-
-    fn identifier(&self) -> u32 {
-        0x00010005
-    }
-}
-
-unsafe impl PropertyTag for GetVcMemory {
-    type RecvType = Mem;
-
-    fn identifier(&self) -> u32 {
-        0x00010006
-    }
 }
 
 const ENTRIES_PER_PAGE: usize = PAGE_SIZE / mem::size_of::<u64>();
@@ -167,60 +132,61 @@ impl PageTables {
         table.l3_table.fill(0);
         table
     }
-}
 
-fn setup_identity_map(page_tables: &mut PageTables) {
-    let mut desc = TableDescriptor::new(page_tables.l2_table.as_ptr() as _);
-    desc.set_af(true);
-    page_tables.l1_table[0] = desc.into();
-
-    let mut desc = TableDescriptor::new(page_tables.l3_table.as_ptr() as _);
-    desc.set_af(true);
-    page_tables.l2_table[0] = desc.into();
-
-    // Map L3 table for the first 2 MiB of space.
-    for i in 0..ENTRIES_PER_PAGE {
-        let addr = i * PAGE_SIZE;
-        let mut desc = PageDescriptor::new(addr);
+    fn setup_identity_map(&mut self, mem_limits: &MemLimits) {
+        let mut desc = TableDescriptor::new(self.l2_table.as_ptr() as _);
         desc.set_af(true);
-        desc.set_sh(Shareability::Inner);
-        desc.set_attr_idx(MemAttrIdx::Normal);
-        if addr < rpi_phys_binary_load_addr() {
-            desc.set_ap(AccessPermission::PrivilegedReadWrite);
-            desc.set_xn(true);
-            desc.set_pxn(true);
-        } else if addr < code_end() {
-            desc.set_ap(AccessPermission::PrivilegedReadOnly);
-        } else {
-            desc.set_ap(AccessPermission::PrivilegedReadWrite);
-            desc.set_xn(true);
-            desc.set_pxn(true);
-        }
-        page_tables.l3_table[i] = desc.into();
-    }
+        self.l1_table[0] = desc.into();
 
-    // Map rest of memory via 2 MiB blocks
-    const BLOCK_SIZE: usize = 2 << 20;
-    const MEM_LIM: usize = TOTAL_MEMORY / BLOCK_SIZE;
-    const MMIO_START: usize = MMIO_BASE / BLOCK_SIZE;
-    for i in 1..ENTRIES_PER_PAGE {
-        let addr = i * BLOCK_SIZE;
-        let mut desc = BlockDescriptor::level2(addr);
+        let mut desc = TableDescriptor::new(self.l3_table.as_ptr() as _);
         desc.set_af(true);
-        desc.set_xn(true);
-        desc.set_pxn(true);
-        if i < MEM_LIM {
+        self.l2_table[0] = desc.into();
+
+        // Map L3 table for the first 2 MiB of space.
+        for i in 0..ENTRIES_PER_PAGE {
+            let addr = i * PAGE_SIZE;
+            let mut desc = PageDescriptor::new(addr);
+            desc.set_af(true);
             desc.set_sh(Shareability::Inner);
             desc.set_attr_idx(MemAttrIdx::Normal);
-            desc.set_ap(AccessPermission::PrivilegedReadWrite);
-        } else if i >= MMIO_START {
-            desc.set_sh(Shareability::Outer);
-            desc.set_attr_idx(MemAttrIdx::Device);
-            desc.set_ap(AccessPermission::PrivilegedReadWrite);
-        } else {
-            desc = BlockDescriptor::invalid();
+            if addr < rpi_phys_binary_load_addr() {
+                desc.set_ap(AccessPermission::PrivilegedReadWrite);
+                desc.set_xn(true);
+                desc.set_pxn(true);
+            } else if addr < code_end() {
+                desc.set_ap(AccessPermission::PrivilegedReadOnly);
+            } else {
+                desc.set_ap(AccessPermission::PrivilegedReadWrite);
+                desc.set_xn(true);
+                desc.set_pxn(true);
+            }
+            self.l3_table[i] = desc.into();
         }
-        page_tables.l2_table[i] = desc.into();
+
+        // Map rest of memory via 2 MiB blocks
+        const BLOCK_SIZE: usize = 2 << 20;
+        let sram_end = (mem_limits.arm_base + mem_limits.arm_size) / BLOCK_SIZE;
+        let vc_end = (mem_limits.vc_base + mem_limits.vc_size) / BLOCK_SIZE;
+        const MMIO_START: usize = MMIO_BASE / BLOCK_SIZE;
+        for i in 1..ENTRIES_PER_PAGE {
+            let addr = i * BLOCK_SIZE;
+            let mut desc = BlockDescriptor::level2(addr);
+            desc.set_af(true);
+            desc.set_xn(true);
+            desc.set_pxn(true);
+            if i < sram_end {
+                desc.set_sh(Shareability::Inner);
+                desc.set_attr_idx(MemAttrIdx::Normal);
+                desc.set_ap(AccessPermission::PrivilegedReadWrite);
+            } else if i < vc_end || i >= MMIO_START {
+                desc.set_sh(Shareability::Outer);
+                desc.set_attr_idx(MemAttrIdx::Device);
+                desc.set_ap(AccessPermission::PrivilegedReadWrite);
+            } else {
+                desc = BlockDescriptor::invalid();
+            }
+            self.l2_table[i] = desc.into();
+        }
     }
 }
 

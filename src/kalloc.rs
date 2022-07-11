@@ -1,4 +1,5 @@
 pub mod bitmap_alloc;
+pub mod fixed_buffer_alloc;
 
 pub use core::alloc::{AllocError, Allocator, Layout};
 
@@ -23,7 +24,7 @@ unsafe impl core::alloc::GlobalAlloc for StubGlobalAllocator {
 static STUB_GLOBAL_ALLOCATOR: StubGlobalAllocator = StubGlobalAllocator {};
 
 #[alloc_error_handler]
-fn stub_alloc_error_handler(layout: Layout) -> ! {
+fn alloc_error_handler(layout: Layout) -> ! {
     panic!(
         "Failed to allocate {} bytes with alignment of {}",
         layout.size(),

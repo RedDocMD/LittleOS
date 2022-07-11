@@ -106,7 +106,7 @@ impl Framebuffer {
         y * (self.pitch / mem::size_of::<Pixel>()) + x
     }
 
-    pub fn set(&mut self, x: usize, y: usize, pixel: Pixel) {
+    pub fn set_pixel(&mut self, x: usize, y: usize, pixel: Pixel) {
         let off = self.offset(x, y);
         assert!(off < self.buf_len);
         unsafe { self.buf.as_ptr().add(off).write_volatile(pixel) };
