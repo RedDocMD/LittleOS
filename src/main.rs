@@ -18,6 +18,7 @@ use crate::{
         framebuffer::{Framebuffer, Pixel},
         mmio::MMIO_BASE,
     },
+    fonts::psf::{PsfFont, DEFAULT_PSF_FONT_BYTES},
     kalloc::{bitmap_alloc::BitmapAllocator, fixed_buffer_alloc::FixedSliceAlloc},
     mmu::{
         layout::*,
@@ -33,6 +34,7 @@ mod boot;
 mod cpu;
 mod driver;
 mod error;
+mod fonts;
 mod kalloc;
 mod mmu;
 mod panic;
@@ -111,6 +113,8 @@ fn kernel_main() -> ! {
             );
         }
     }
+
+    let psf_font = PsfFont::new(DEFAULT_PSF_FONT_BYTES);
 
     cpu::wait_forever();
 }
