@@ -14,11 +14,11 @@ use std_alloc::vec::Vec;
 use tock_registers::interfaces::{Readable, Writeable};
 
 use crate::{
-    driver::{
-        framebuffer::{Framebuffer, Pixel},
-        mmio::MMIO_BASE,
+    driver::{framebuffer::Framebuffer, mmio::MMIO_BASE},
+    fonts::{
+        psf::{PsfFont, DEFAULT_PSF_FONT_BYTES},
+        Font,
     },
-    fonts::psf::{PsfFont, DEFAULT_PSF_FONT_BYTES},
     kalloc::{bitmap_alloc::BitmapAllocator, fixed_buffer_alloc::FixedSliceAlloc},
     mmu::{
         layout::*,
@@ -100,21 +100,10 @@ fn kernel_main() -> ! {
 
     let mut framebuffer = Framebuffer::new(&alloc).unwrap();
     kprintln!("{:?}", framebuffer);
-    let pixel_order = framebuffer.pixel_order();
-    for y in 0..framebuffer.height() {
-        for x in 0..framebuffer.width() {
-            framebuffer.set_pixel(
-                x,
-                y,
-                Pixel::new(
-                    ((x % 256) as u8, (y % 256) as u8, ((x + y) % 256) as u8, 255),
-                    pixel_order,
-                ),
-            );
-        }
-    }
 
     let psf_font = PsfFont::new(DEFAULT_PSF_FONT_BYTES);
+    psf_font.render_str("Hello World!", &mut framebuffer, 0, 20);
+    kprintln!("Rendered a string!");
 
     cpu::wait_forever();
 }
