@@ -1,6 +1,6 @@
 use core::fmt;
 
-use crate::driver::{console, qemu_console};
+use crate::driver::{qemu_console, serial_console};
 
 pub trait Write {
     fn write_fmt(&self, args: fmt::Arguments) -> fmt::Result;
@@ -8,7 +8,7 @@ pub trait Write {
 
 #[doc(hidden)]
 pub fn _print(args: fmt::Arguments) {
-    console().write_fmt(args).unwrap();
+    serial_console().write_fmt(args).unwrap();
 }
 
 #[doc(hidden)]

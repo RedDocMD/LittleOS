@@ -1,5 +1,6 @@
 use self::{mini_uart::MINI_UART, qemu::QEMU_OUTPUT, uart::PL011_UART};
 
+pub mod console;
 pub mod framebuffer;
 pub mod gpio;
 pub mod mailbox;
@@ -8,7 +9,7 @@ pub mod mmio;
 pub mod qemu;
 pub mod uart;
 
-pub fn console() -> &'static impl crate::print::Write {
+pub fn serial_console() -> &'static impl crate::print::Write {
     &PL011_UART
 }
 

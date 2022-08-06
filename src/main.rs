@@ -103,7 +103,6 @@ fn kernel_main() -> ! {
 
     let psf_font = PsfFont::new(DEFAULT_PSF_FONT_BYTES);
     psf_font.render_str("Hello World!", &mut framebuffer, 0, 20);
-    kprintln!("Rendered a string!");
 
     cpu::wait_forever();
 }
