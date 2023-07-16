@@ -87,11 +87,13 @@ fn kernel_main() -> ! {
         for i in 0..NUMS_COUNT {
             nums.push((i + 1) * 2);
         }
-        kprintln!("nums = {:?}", nums);
 
         let mut floats: Vec<f32, _> = Vec::new_in(&alloc);
         const FLOATS_COUNT: usize = 15;
-        floats.reserve(FLOATS_COUNT);
+        floats.resize(FLOATS_COUNT, 0.5);
+
+        kprintln!("nums = {:?}", nums);
+        kprintln!("floats = {:?}", floats);
 
         kprintln!("Bootmem start = {:#018X}", boot_alloc_start());
         kprintln!("nums start =    {:#018X}", nums.as_ptr() as usize);

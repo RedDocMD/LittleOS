@@ -13,7 +13,7 @@ ifneq ($(VERBOSE),)
 	CARGO_FLAGS += "-vv"
 endif
 
-ELF := target/aarch64-unknown-none-softfloat/$(TYPE)/kernel
+ELF := ~/.cargo_target/aarch64-unknown-none-softfloat/$(TYPE)/kernel
 
 run: $(IMG)
 	qemu-system-aarch64 -kernel $(IMG) -machine raspi3ap \
